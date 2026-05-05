@@ -59,8 +59,8 @@ from AppKit import (
 )
 from WebKit import WKWebView, WKWebViewConfiguration
 
-NSPopoverBehaviorTransient = 1   # closes when clicking outside
-NSRectEdgeMinY = 1               # popover drops down from button
+NSPopoverBehaviorApplicationDefined = 0  # stays open until we close it
+NSRectEdgeMinY = 1                       # popover drops down from button
 
 # ── port helpers ──────────────────────────────────────────────────────────────
 
@@ -164,6 +164,23 @@ function nt(){{
     if(!title)return;
     tlabel.textContent=title;
     te.title=title;  /* full title on hover */
+  }});
+  /* ⌘C = copy selection (fall through to send ^C if nothing selected)
+     ⌘V = paste clipboard into terminal */
+  term.attachCustomKeyEventHandler(function(e){{
+    if(e.type!=='keydown')return true;
+    if(e.metaKey&&e.key==='c'){{
+      if(term.hasSelection()){{
+        navigator.clipboard.writeText(term.getSelection()).catch(function(){{}});
+        return false;
+      }}
+      return true; /* let xterm send ^C to the PTY */
+    }}
+    if(e.metaKey&&e.key==='v'){{
+      navigator.clipboard.readText().then(function(t){{term.paste(t);}}).catch(function(){{}});
+      return false;
+    }}
+    return true;
   }});
   /* auto-resize when container resizes */
   new ResizeObserver(function(){{
@@ -364,13 +381,15 @@ class AppDelegate(NSObject):
         btn = self._item.button()
         self._popover.showRelativeToRect_ofView_preferredEdge_(
             btn.bounds(), btn, NSRectEdgeMinY)
+        # Activate so the webview captures ⌘C / ⌘V / Ctrl+C etc.
+        NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
 
     def _build_popover(self):
         vc = TerminalViewController.alloc().init()
 
         popover = NSPopover.alloc().init()
         popover.setContentSize_(NSMakeSize(960, 620))
-        popover.setBehavior_(NSPopoverBehaviorTransient)
+        popover.setBehavior_(NSPopoverBehaviorApplicationDefined)
         popover.setAnimates_(True)
         popover.setContentViewController_(vc)
 
