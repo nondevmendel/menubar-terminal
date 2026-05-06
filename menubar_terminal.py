@@ -53,11 +53,11 @@ except ImportError:
 from Foundation import NSObject, NSURL, NSMakeSize
 from AppKit import (
     NSApplication, NSStatusBar, NSPopover, NSViewController, NSView,
-    NSColor, NSMakeRect,
+    NSColor, NSMakeRect, NSPasteboard, NSPasteboardTypeString,
     NSApplicationActivationPolicyAccessory,
     NSVariableStatusItemLength,
 )
-from WebKit import WKWebView, WKWebViewConfiguration
+from WebKit import WKWebView, WKWebViewConfiguration, WKUserContentController
 
 NSPopoverBehaviorApplicationDefined = 0  # stays open until we close it
 NSRectEdgeMinY = 1                       # popover drops down from button
@@ -112,6 +112,12 @@ html,body{{height:100%;background:#0d1117;display:flex;flex-direction:column;ove
 <script>
 var tabs=[],act=null,n=0;
 
+/* Native clipboard bridge — called by _ClipboardBridge on the Swift/ObjC side */
+window._termPaste=function(text){{
+  var t=tabs.find(function(t){{return t.id===act;}});
+  if(t)t.term.paste(text);
+}};
+
 function nt(){{
   var id=++n;
   /* tab button */
@@ -165,19 +171,19 @@ function nt(){{
     tlabel.textContent=title;
     te.title=title;  /* full title on hover */
   }});
-  /* ⌘C = copy selection (fall through to send ^C if nothing selected)
-     ⌘V = paste clipboard into terminal */
+  /* ⌘C = copy selection via NSPasteboard (navigator.clipboard blocked in WKWebView)
+     ⌘V = paste via NSPasteboard bridge; fall through ^C if no selection */
   term.attachCustomKeyEventHandler(function(e){{
     if(e.type!=='keydown')return true;
     if(e.metaKey&&e.key==='c'){{
       if(term.hasSelection()){{
-        navigator.clipboard.writeText(term.getSelection()).catch(function(){{}});
+        window.webkit.messageHandlers.copy.postMessage(term.getSelection());
         return false;
       }}
-      return true; /* let xterm send ^C to the PTY */
+      return true; /* no selection → let xterm send ^C to the PTY */
     }}
     if(e.metaKey&&e.key==='v'){{
-      navigator.clipboard.readText().then(function(t){{term.paste(t);}}).catch(function(){{}});
+      window.webkit.messageHandlers.paste.postMessage(null);
       return false;
     }}
     return true;
@@ -327,6 +333,27 @@ async def ws_handler(ws, *_ignored) -> None:
 
 # ── macOS UI ──────────────────────────────────────────────────────────────────
 
+class _ClipboardBridge(NSObject):
+    """WKScriptMessageHandler: lets JS read/write NSPasteboard directly.
+    navigator.clipboard is blocked in WKWebView (non-secure origin)."""
+
+    def setWebView_(self, wv):
+        self._wv = wv
+
+    def userContentController_didReceiveScriptMessage_(self, _ucc, msg):
+        name = str(msg.name())
+        if name == "paste":
+            pb = NSPasteboard.generalPasteboard()
+            text = pb.stringForType_(NSPasteboardTypeString) or ""
+            js = "window._termPaste(" + json.dumps(text) + ")"
+            self._wv.evaluateJavaScript_completionHandler_(js, None)
+        elif name == "copy":
+            text = str(msg.body() or "")
+            pb = NSPasteboard.generalPasteboard()
+            pb.clearContents()
+            pb.setString_forType_(text, NSPasteboardTypeString)
+
+
 class TerminalViewController(NSViewController):
     """View controller that hosts the WKWebView inside the NSPopover."""
 
@@ -339,7 +366,14 @@ class TerminalViewController(NSViewController):
             NSColor.colorWithCalibratedRed_green_blue_alpha_(
                 0.05, 0.07, 0.09, 1.0).CGColor())
 
+        # Wire up native clipboard bridge before creating the webview
+        ucc = WKUserContentController.alloc().init()
+        self._bridge = _ClipboardBridge.alloc().init()
+        ucc.addScriptMessageHandler_name_(self._bridge, "paste")
+        ucc.addScriptMessageHandler_name_(self._bridge, "copy")
+
         cfg = WKWebViewConfiguration.alloc().init()
+        cfg.setUserContentController_(ucc)
         try:
             cfg.preferences().setValue_forKey_(True, "developerExtrasEnabled")
         except Exception:
@@ -350,6 +384,7 @@ class TerminalViewController(NSViewController):
         wv.loadHTMLString_baseURL_(
             HTML, NSURL.URLWithString_("http://127.0.0.1/"))
 
+        self._bridge.setWebView_(wv)
         view.addSubview_(wv)
         self.setView_(view)
         self._wv = wv
@@ -381,8 +416,11 @@ class AppDelegate(NSObject):
         btn = self._item.button()
         self._popover.showRelativeToRect_ofView_preferredEdge_(
             btn.bounds(), btn, NSRectEdgeMinY)
-        # Activate so the webview captures ⌘C / ⌘V / Ctrl+C etc.
         NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+        # Give the WKWebView first-responder so key events flow in immediately
+        wv = self._vc._wv
+        if wv and wv.window():
+            wv.window().makeFirstResponder_(wv)
 
     def _build_popover(self):
         vc = TerminalViewController.alloc().init()
