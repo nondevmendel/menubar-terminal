@@ -12,7 +12,7 @@ Run:       python3 ~/menubar_terminal.py &
 Auto-start: load ~/Library/LaunchAgents/com.user.menubar-terminal.plist
 """
 
-import sys, os, pty, asyncio, threading, json, shutil
+import sys, os, pty, asyncio, threading, json, shutil, urllib.request
 import select, struct, fcntl, termios, time, socket, signal, subprocess
 
 # ── single-instance lock ──────────────────────────────────────────────────────
@@ -86,11 +86,42 @@ def _free_port(start=57231):
 WS_PORT   = _free_port(57231)
 HTTP_PORT = _free_port(57331)
 
+# ── local asset cache (xterm.js served from disk, no CDN in WKWebView) ────────
+
+_CACHE_DIR = os.path.expanduser("~/.menubar_terminal")
+os.makedirs(_CACHE_DIR, exist_ok=True)
+
+_CDN = {
+    "xterm.js":     "https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js",
+    "xterm-fit.js": "https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js",
+    "xterm.css":    "https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css",
+}
+_assets: dict = {}   # filename → bytes
+
+def _load_assets():
+    for name, url in _CDN.items():
+        path = os.path.join(_CACHE_DIR, name)
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                _assets[name] = f.read()
+        else:
+            print(f"[menubar-terminal] Downloading {name} …")
+            try:
+                with urllib.request.urlopen(url, timeout=15) as r:
+                    data = r.read()
+                with open(path, "wb") as f:
+                    f.write(data)
+                _assets[name] = data
+            except Exception as e:
+                print(f"[menubar-terminal] WARNING: could not fetch {name}: {e}")
+
+_load_assets()
+
 # ── HTML / front-end ──────────────────────────────────────────────────────────
 HTML = f"""\
 <!DOCTYPE html><html>
 <head><meta charset="UTF-8">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
+<link rel="stylesheet" href="/xterm.css">
 <style>
 *{{margin:0;padding:0;box-sizing:border-box}}
 html,body{{height:100%;background:#0d1117;display:flex;flex-direction:column;overflow:hidden}}
@@ -167,8 +198,8 @@ html,body{{height:100%;background:#0d1117;display:flex;flex-direction:column;ove
     </div>
   </div>
 </div>
-<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+<script src="/xterm.js"></script>
+<script src="/xterm-fit.js"></script>
 <script>
 var tabs=[],act=null,n=0,spOpen=false,spTimer=null;
 
@@ -591,13 +622,22 @@ class AppDelegate(NSObject):
 # ── HTTP server (serves the HTML so CDN scripts load from a real origin) ─────
 
 class _HTMLHandler(BaseHTTPRequestHandler):
+    _types = {".js": "text/javascript", ".css": "text/css"}
+
     def do_GET(self):
-        body = HTML.encode("utf-8")
+        name = self.path.lstrip("/")
+        if name in _assets:
+            body = _assets[name]
+            ct   = self._types.get(os.path.splitext(name)[1], "application/octet-stream")
+        else:
+            body = HTML.encode("utf-8")
+            ct   = "text/html; charset=utf-8"
         self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Type", ct)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
     def log_message(self, *_): pass
 
 # ── server thread ─────────────────────────────────────────────────────────────
