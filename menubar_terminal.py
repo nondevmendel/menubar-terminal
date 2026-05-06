@@ -38,7 +38,8 @@ except: _pip("pyobjc-framework-WebKit")
 try:    import websockets
 except: _pip("websockets"); import websockets
 
-from Foundation import NSObject, NSURL, NSMakeSize
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from Foundation import NSObject, NSURL, NSMakeSize, NSURLRequest
 from AppKit import (
     NSApplication, NSStatusBar, NSPopover, NSViewController, NSView,
     NSColor, NSMakeRect, NSPasteboard, NSPasteboardTypeString,
@@ -82,7 +83,8 @@ def _free_port(start=57231):
             except OSError: pass
     raise RuntimeError("No free port")
 
-WS_PORT = _free_port(57231)
+WS_PORT   = _free_port(57231)
+HTTP_PORT = _free_port(57331)
 
 # ── HTML / front-end ──────────────────────────────────────────────────────────
 HTML = f"""\
@@ -539,7 +541,8 @@ class TerminalViewController(NSViewController):
 
         wv = WKWebView.alloc().initWithFrame_configuration_(frame, cfg)
         wv.setAutoresizingMask_(18)
-        wv.loadHTMLString_baseURL_(HTML, NSURL.URLWithString_("http://127.0.0.1/"))
+        url = NSURL.URLWithString_(f"http://127.0.0.1:{HTTP_PORT}/")
+        wv.loadRequest_(NSURLRequest.requestWithURL_(url))
 
         self._bridge.setWebView_(wv)
         view.addSubview_(wv)
@@ -585,12 +588,26 @@ class AppDelegate(NSObject):
         self._popover = popover
         self._vc = vc
 
+# ── HTTP server (serves the HTML so CDN scripts load from a real origin) ─────
+
+class _HTMLHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = HTML.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    def log_message(self, *_): pass
+
 # ── server thread ─────────────────────────────────────────────────────────────
 
 def _run_ws_server() -> None:
     async def _main():
+        http = HTTPServer(("127.0.0.1", HTTP_PORT), _HTMLHandler)
+        threading.Thread(target=http.serve_forever, daemon=True).start()
         async with websockets.serve(ws_router, "127.0.0.1", WS_PORT):
-            print(f"[menubar-terminal] ws://127.0.0.1:{WS_PORT}")
+            print(f"[menubar-terminal] http://127.0.0.1:{HTTP_PORT}  ws://127.0.0.1:{WS_PORT}")
             await asyncio.Future()
     asyncio.run(_main())
 
