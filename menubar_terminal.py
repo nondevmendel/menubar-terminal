@@ -44,9 +44,9 @@ from AppKit import (
     NSApplication, NSStatusBar, NSPopover, NSViewController, NSView,
     NSColor, NSMakeRect, NSPasteboard, NSPasteboardTypeString,
     NSApplicationActivationPolicyAccessory, NSVariableStatusItemLength,
-    NSFont, NSForegroundColorAttributeName, NSImage, NSBezierPath,
-    NSImageLeft,
+    NSFont, NSForegroundColorAttributeName, NSFontAttributeName,
 )
+from Foundation import NSMutableAttributedString
 from WebKit import WKWebView, WKWebViewConfiguration, WKUserContentController
 
 NSPopoverBehaviorApplicationDefined = 0
@@ -654,17 +654,6 @@ async def ws_router(ws, *args) -> None:
 
 _app_delegate_ref = None   # set in applicationDidFinishLaunching_
 
-def _make_dot_image(color, size=18):
-    """Draw a filled circle in the given color; non-template so macOS shows real color."""
-    img = NSImage.alloc().initWithSize_(NSMakeSize(size, size))
-    img.lockFocus()
-    color.set()
-    NSBezierPath.bezierPathWithOvalInRect_(NSMakeRect(2, 2, size - 4, size - 4)).fill()
-    img.unlockFocus()
-    img.setTemplate_(False)
-    return img
-
-_STATUS_IMAGES = {}   # lazily populated on first STATUS message (needs AppKit running)
 
 class _ClipboardBridge(NSObject):
     def setWebView_(self, wv):
@@ -689,14 +678,16 @@ class _ClipboardBridge(NSObject):
         elif name == "status":
             state = str(msg.body() or "idle")
             try:
-                if not _STATUS_IMAGES:
-                    _STATUS_IMAGES["idle"]      = _make_dot_image(NSColor.colorWithSRGBRed_green_blue_alpha_(0.40, 0.42, 0.44, 1.0))
-                    _STATUS_IMAGES["running"]   = _make_dot_image(NSColor.colorWithSRGBRed_green_blue_alpha_(0.18, 0.80, 0.44, 1.0))
-                    _STATUS_IMAGES["attention"] = _make_dot_image(NSColor.colorWithSRGBRed_green_blue_alpha_(1.00, 0.58, 0.00, 1.0))
+                color = {
+                    "running":   NSColor.colorWithSRGBRed_green_blue_alpha_(0.18, 0.80, 0.44, 1.0),
+                    "attention": NSColor.colorWithSRGBRed_green_blue_alpha_(1.00, 0.58, 0.00, 1.0),
+                }.get(state, NSColor.colorWithSRGBRed_green_blue_alpha_(0.55, 0.57, 0.60, 1.0))
+                astr = NSMutableAttributedString.alloc().initWithString_("⌨")
+                rng = (0, astr.length())
+                astr.addAttribute_value_range_(NSForegroundColorAttributeName, color, rng)
+                astr.addAttribute_value_range_(NSFontAttributeName, NSFont.menuBarFontOfSize_(14), rng)
                 if _app_delegate_ref is not None:
-                    btn = _app_delegate_ref._item.button()
-                    btn.setImage_(_STATUS_IMAGES.get(state, _STATUS_IMAGES["idle"]))
-                    btn.setImagePosition_(NSImageLeft)
+                    _app_delegate_ref._item.button().setAttributedTitle_(astr)
             except Exception as e:
                 print(f"[STATUS] error: {e}", flush=True)
 
