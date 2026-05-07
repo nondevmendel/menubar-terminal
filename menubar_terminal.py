@@ -44,6 +44,8 @@ from AppKit import (
     NSApplication, NSStatusBar, NSPopover, NSViewController, NSView,
     NSColor, NSMakeRect, NSPasteboard, NSPasteboardTypeString,
     NSApplicationActivationPolicyAccessory, NSVariableStatusItemLength,
+    NSFont, NSForegroundColorAttributeName, NSImage, NSBezierPath,
+    NSImageLeft,
 )
 from WebKit import WKWebView, WKWebViewConfiguration, WKUserContentController
 
@@ -63,16 +65,29 @@ def _tmux(*args) -> str:
 
 def _list_sessions():
     out = _tmux("ls", "-F",
-                "#{session_name}|#{session_windows}|#{session_attached}|#{session_created}")
+                "#{session_name}|#{session_windows}|#{session_attached}")
     sessions = []
     for line in out.splitlines():
         parts = line.split("|")
-        if len(parts) == 4:
+        if len(parts) == 3:
             sessions.append({
                 "name":     parts[0],
                 "windows":  int(parts[1]),
                 "attached": parts[2] == "1",
+                "title":    "",
             })
+
+    # Fetch the active pane title for each session
+    panes_out = _tmux("list-panes", "-a", "-F",
+                      "#{session_name}|#{pane_active}|#{window_active}|#{pane_title}")
+    titles: dict = {}
+    for line in panes_out.splitlines():
+        parts = line.split("|", 3)
+        if len(parts) == 4 and parts[1] == "1" and parts[2] == "1":
+            titles[parts[0]] = parts[3]
+    for s in sessions:
+        s["title"] = titles.get(s["name"], "")
+
     return sessions
 
 # ── port helpers ──────────────────────────────────────────────────────────────
@@ -137,6 +152,9 @@ html,body{{height:100%;background:#0d1117;display:flex;flex-direction:column;ove
 .x{{opacity:0;font-size:10px;margin-left:2px;flex-shrink:0}}
 .tab:hover .x{{opacity:.6}}
 .x:hover{{opacity:1!important;color:#f85149}}
+.tdot{{display:inline-block;width:6px;height:6px;border-radius:50%;flex-shrink:0;margin-right:3px;background:#484f58}}
+.tdot.running{{background:#3fb950}}
+.tdot.attention{{background:#f0883e}}
 #bar-right{{margin-left:auto;display:flex;align-items:center;gap:2px}}
 .bar-btn{{background:none;border:none;color:#8b949e;cursor:pointer;
           padding:2px 7px;border-radius:4px;font-family:-apple-system,sans-serif;
@@ -167,7 +185,10 @@ html,body{{height:100%;background:#0d1117;display:flex;flex-direction:column;ove
 .smeta{{font:11px -apple-system,sans-serif;color:#6e7681;margin-bottom:7px}}
 .sdot{{display:inline-block;width:7px;height:7px;border-radius:50%;
       margin-right:5px;background:#484f58;vertical-align:middle}}
-.sdot.on{{background:#3fb950}}
+.sdot.running{{background:#3fb950}}
+.sdot.attention{{background:#f0883e}}
+.sp-sec{{padding:8px 10px 3px;font:600 10px -apple-system,sans-serif;
+         color:#484f58;letter-spacing:.08em;text-transform:uppercase}}
 .sbtns{{display:flex;gap:5px}}
 .sbtn{{flex:1;padding:3px 0;border-radius:4px;border:1px solid #30363d;
       background:#21262d;color:#8b949e;font:11px -apple-system,sans-serif;cursor:pointer;
@@ -183,10 +204,17 @@ html,body{{height:100%;background:#0d1117;display:flex;flex-direction:column;ove
 </head>
 <body>
 <div id="bar">
+  <button class="bar-btn" id="plus" onclick="nt()" title="New tab  ⌘T">+</button>
+  <button class="bar-btn" id="claude-btn" onclick="ntClaude()" title="New Claude session"><svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="10" cy="13" rx="5" ry="3.5"/><path d="M5 12C2 11 1 8 2.5 7C3.5 6 4.5 7 5 10"/><path d="M15 12C18 11 19 8 17.5 7C16.5 6 15.5 7 15 10"/><line x1="6" y1="16" x2="4" y2="19"/><line x1="8.5" y1="16.5" x2="7.5" y2="19"/><line x1="11.5" y1="16.5" x2="12.5" y2="19"/><line x1="14" y1="16" x2="16" y2="19"/><circle cx="7.5" cy="9.5" r="1" fill="currentColor" stroke="none"/><circle cx="12.5" cy="9.5" r="1" fill="currentColor" stroke="none"/></svg></button>
   <div id="bar-right">
-    <button class="bar-btn" id="plus" onclick="nt()" title="New tab  ⌘T">+</button>
     <button class="bar-btn" id="sess-btn" onclick="toggleSessions()" title="Sessions">⊞</button>
   </div>
+</div>
+<!-- close-tab menu -->
+<div id="cm" style="display:none;position:fixed;z-index:9999;background:#161b22;border:1px solid #30363d;border-radius:7px;padding:5px;box-shadow:0 6px 20px rgba(0,0,0,.6);min-width:160px">
+  <div style="font:11px -apple-system;color:#6e7681;padding:3px 8px 6px">Close tab</div>
+  <button id="cm-pause" style="display:block;width:100%;text-align:left;padding:6px 10px;background:none;border:none;border-radius:5px;color:#c9d1d9;font:13px -apple-system;cursor:pointer" onmouseover="this.style.background='#21262d'" onmouseout="this.style.background='none'">Hide  <span style="color:#6e7681;font-size:11px">(keep running in background)</span></button>
+  <button id="cm-kill" style="display:block;width:100%;text-align:left;padding:6px 10px;background:none;border:none;border-radius:5px;color:#f85149;font:13px -apple-system;cursor:pointer" onmouseover="this.style.background='#21262d'" onmouseout="this.style.background='none'">Kill session</button>
 </div>
 <div id="main">
   <div id="terms"></div>
@@ -203,24 +231,64 @@ html,body{{height:100%;background:#0d1117;display:flex;flex-direction:column;ove
 <script>
 var tabs=[],act=null,n=0,spOpen=false,spTimer=null;
 
+function setTabState(obj,state){{
+  obj.state=state;
+  obj.dotEl.className='tdot '+state;
+  updateMenuBarState();
+}}
+function updateMenuBarState(){{
+  var s='idle';
+  for(var i=0;i<tabs.length;i++){{
+    if(tabs[i].state==='attention'){{s='attention';break;}}
+    if(tabs[i].state==='running')s='running';
+  }}
+  try{{
+    window.webkit.messageHandlers.status.postMessage(s);
+  }}catch(ex){{
+    try{{window.webkit.messageHandlers.log.postMessage('status-err:'+ex);}}catch(e2){{}}
+  }}
+}}
+
 /* ── native clipboard bridge ── */
 window._termPaste=function(text){{
   var t=tabs.find(function(t){{return t.id===act;}});
   if(t)t.term.paste(text);
 }};
 
+/* ── close-tab menu ── */
+var cm=document.getElementById('cm');
+var cmTarget=null;
+function showCloseMenu(e,id){{
+  e.stopPropagation();
+  cmTarget=id;
+  cm.style.left=(e.clientX-10)+'px';
+  cm.style.top=(e.clientY+4)+'px';
+  cm.style.display='block';
+}}
+document.addEventListener('click',function(){{cm.style.display='none';cmTarget=null;}});
+document.getElementById('cm-pause').onclick=function(e){{
+  e.stopPropagation();cm.style.display='none';
+  if(cmTarget!==null)ct(cmTarget,false);cmTarget=null;
+}};
+document.getElementById('cm-kill').onclick=function(e){{
+  e.stopPropagation();cm.style.display='none';
+  if(cmTarget!==null)ct(cmTarget,true);cmTarget=null;
+}};
+
 /* ── control WebSocket (session management) ── */
 var ctrl=null;
-function ctrlSend(obj){{
+function ctrlSend(obj,cb){{
   if(!ctrl||ctrl.readyState!==1){{
     ctrl=new WebSocket('ws://127.0.0.1:{WS_PORT}/control');
     ctrl.onmessage=function(e){{
       var d=JSON.parse(e.data);
       if(d.type==='sessions')renderSessions(d.data);
+      if(cb){{cb();cb=null;}}
     }};
     ctrl.onopen=function(){{ctrl.send(JSON.stringify(obj));}};
   }}else{{
     ctrl.send(JSON.stringify(obj));
+    if(cb)setTimeout(cb,300);
   }}
 }}
 function refreshSessions(){{ctrlSend({{action:'list'}});}}
@@ -230,125 +298,150 @@ function toggleSessions(){{
   spOpen=!spOpen;
   document.getElementById('sp').classList.toggle('open',spOpen);
   document.getElementById('sess-btn').classList.toggle('active',spOpen);
-  if(spOpen){{
-    refreshSessions();
-    spTimer=setInterval(refreshSessions,3000);
-  }}else{{
-    clearInterval(spTimer);spTimer=null;
-  }}
-  /* refit active terminal */
+  if(spOpen){{refreshSessions();spTimer=setInterval(refreshSessions,3000);}}
+  else{{clearInterval(spTimer);spTimer=null;}}
   var t=tabs.find(function(t){{return t.id===act;}});
   if(t)setTimeout(function(){{t.fa.fit();rsz(t.ws,t.term);}},250);
 }}
 
 function renderSessions(list){{
   var el=document.getElementById('sp-list');
-  if(!list||!list.length){{
-    el.innerHTML='<div id="sp-empty">No tmux sessions</div>';return;
-  }}
+  if(!list||!list.length){{el.innerHTML='<div id="sp-empty">No tmux sessions</div>';return;}}
   el.innerHTML='';
-  list.forEach(function(s){{
-    var d=document.createElement('div');
-    d.className='srow';
-    d.innerHTML=
-      '<div class="sname"><span class="sdot'+(s.attached?' on':'')+'"></span>'+esc(s.name)+'</div>'+
-      '<div class="smeta">'+s.windows+' window'+(s.windows!==1?'s':'')+
-      (s.attached?' · active':'')+'</div>'+
-      '<div class="sbtns">'+
-      '<button class="sbtn" onclick="connectSession(\''+esc(s.name)+'\')">Connect</button>'+
-      '<button class="sbtn" onclick="detachSession(\''+esc(s.name)+'\')">Pause</button>'+
-      '<button class="sbtn kill" onclick="killSession(\''+esc(s.name)+'\')">Kill</button>'+
+
+  function makeRow(s,tab){{
+    var display=s.title||s.name;
+    var dotState=tab?tab.state:'idle';
+    var primaryBtn=tab
+      ?'<button class="sbtn" data-n="'+esc(s.name)+'" onclick="hideTab(this.dataset.n)">Hide</button>'
+      :'<button class="sbtn" data-n="'+esc(s.name)+'" onclick="ntAttach(this.dataset.n)">Open in New Tab</button>';
+    var d=document.createElement('div');d.className='srow';
+    d.innerHTML='<div class="sname"><span class="sdot '+dotState+'"></span>'+esc(display)+'</div>'+
+      '<div class="smeta">'+esc(s.name)+' · '+s.windows+' window'+(s.windows!==1?'s':'')+'</div>'+
+      '<div class="sbtns">'+primaryBtn+
+      '<button class="sbtn kill" data-n="'+esc(s.name)+'" onclick="killSession(this.dataset.n)">Kill</button>'+
       '</div>';
-    el.appendChild(d);
+    return d;
+  }}
+
+  var open=[],hidden=[];
+  list.forEach(function(s){{
+    var tab=tabs.find(function(t){{return t.name===s.name;}});
+    if(tab)open.push({{s:s,tab:tab}});else hidden.push({{s:s,tab:null}});
   }});
+
+  if(open.length){{
+    var h=document.createElement('div');h.className='sp-sec';h.textContent='Open';el.appendChild(h);
+    open.forEach(function(x){{el.appendChild(makeRow(x.s,x.tab));}});
+  }}
+  if(hidden.length){{
+    var h=document.createElement('div');h.className='sp-sec';h.textContent='Hidden';el.appendChild(h);
+    hidden.forEach(function(x){{el.appendChild(makeRow(x.s,x.tab));}});
+  }}
 }}
-
-function esc(s){{return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/'/g,"\\'");}}
-
-function connectSession(name){{ntAttach(name);}}
-function detachSession(name){{ctrlSend({{action:'detach',name:name}});setTimeout(refreshSessions,400);}}
+function hideTab(name){{
+  var t=tabs.find(function(t){{return t.name===name;}});
+  if(t)ct(t.id,false);
+}}
+function esc(s){{return s.replace(/&/g,'&amp;').replace(/</g,'&lt;');}}
 function killSession(name){{
-  if(!confirm('Kill session "'+name+'"? Running processes will be lost.'))return;
-  ctrlSend({{action:'kill',name:name}});setTimeout(refreshSessions,400);
+  ctrlSend({{action:'kill',name:name}},function(){{refreshSessions();}});
+  /* also close any tab attached to this session */
+  var t=tabs.find(function(t){{return t.name===name;}});
+  if(t){{try{{t.ws.close();}}catch(ex){{}}t.tw.remove();t.te.remove();tabs=tabs.filter(function(x){{return x.id!==t.id;}});if(!tabs.length)nt();else if(act===t.id)sw(tabs[0].id);}}
 }}
 function newSession(){{nt();}}
 
 /* ── terminal tabs ── */
-function nt(attachTo){{
+function ntClaude(){{nt(null,'claude\\n');}}
+function nt(attachTo,initCmd){{
   var id=++n;
   var wsUrl=attachTo
     ?'ws://127.0.0.1:{WS_PORT}/attach/'+encodeURIComponent(attachTo)
     :'ws://127.0.0.1:{WS_PORT}/new';
 
-  /* tab button */
   var te=document.createElement('div');
   te.className='tab';te.dataset.id=id;
-  var tlabel=document.createElement('span');
-  tlabel.className='tlabel';
-  tlabel.textContent=attachTo?attachTo:'Terminal '+n;
+  var tnew=document.createElement('span');tnew.className='tdot';
+  te.appendChild(tnew);
+  var tlabel=document.createElement('span');tlabel.className='tlabel';
+  tlabel.textContent=attachTo||('Tab '+n);
   te.appendChild(tlabel);
-  var tx=document.createElement('span');
-  tx.className='x';tx.textContent='✕';
-  tx.onclick=function(e){{e.stopPropagation();ct(id);}};
+  var tx=document.createElement('span');tx.className='x';tx.textContent='✕';
+  tx.onclick=function(e){{showCloseMenu(e,id);}};
   te.appendChild(tx);
   te.onclick=function(){{sw(id);}};
-  /* insert tabs before the right-side button group */
   var bar=document.getElementById('bar');
-  var right=document.getElementById('bar-right');
-  bar.insertBefore(te,right);
+  bar.insertBefore(te,document.getElementById('plus'));
 
-  /* terminal container */
   var tw=document.createElement('div');
   tw.className='tw';tw.id='tw'+id;
   document.getElementById('terms').appendChild(tw);
 
-  var term=new Terminal({{
-    cursorBlink:true,fontSize:13,lineHeight:1.25,
-    fontFamily:'Menlo,"SF Mono",Monaco,"Courier New",monospace',
-    theme:{{
-      background:'#0d1117',foreground:'#c9d1d9',cursor:'#58a6ff',
-      selectionBackground:'rgba(56,139,253,.15)',
-      black:'#484f58',red:'#ff7b72',green:'#3fb950',yellow:'#d29922',
-      blue:'#58a6ff',magenta:'#bc8cff',cyan:'#39c5cf',white:'#b1bac4',
-      brightBlack:'#6e7681',brightRed:'#ffa198',brightGreen:'#56d364',
-      brightYellow:'#e3b341',brightBlue:'#79c0ff',brightMagenta:'#d2a8ff',
-      brightCyan:'#56d4dd',brightWhite:'#f0f6fc'
-    }}}});
-  var fa=new FitAddon.FitAddon();
-  term.loadAddon(fa);term.open(tw);
+  tw.style.display='block';
+  var term,fa;
+  try{{
+    term=new Terminal({{
+      cursorBlink:true,fontSize:13,lineHeight:1.25,
+      fontFamily:'Menlo,"SF Mono",Monaco,"Courier New",monospace',
+      theme:{{background:'#0d1117',foreground:'#c9d1d9',cursor:'#58a6ff',
+        selectionBackground:'rgba(56,139,253,.15)',
+        black:'#484f58',red:'#ff7b72',green:'#3fb950',yellow:'#d29922',
+        blue:'#58a6ff',magenta:'#bc8cff',cyan:'#39c5cf',white:'#b1bac4',
+        brightBlack:'#6e7681',brightRed:'#ffa198',brightGreen:'#56d364',
+        brightYellow:'#e3b341',brightBlue:'#79c0ff',brightMagenta:'#d2a8ff',
+        brightCyan:'#56d4dd',brightWhite:'#f0f6fc'}}
+    }});
+    fa=new (FitAddon.FitAddon||FitAddon)();
+    term.loadAddon(fa);
+    term.open(tw);
+  }}catch(e){{tw.style.display='';return;}}
+  tw.style.display='';
 
+  var obj={{id:id,name:attachTo||'',term:term,fa:fa,ws:null,tw:tw,te:te,dotEl:tnew,state:'idle',runTimer:null}};
   var ws=new WebSocket(wsUrl);
   ws.binaryType='arraybuffer';
-  ws.onopen=function(){{fa.fit();rsz(ws,term);}};
+  obj.ws=ws;
+  var wsReady=false;
+  ws.onopen=function(){{wsReady=true;fa.fit();rsz(ws,term);if(initCmd)setTimeout(function(){{if(ws.readyState===1)ws.send(new TextEncoder().encode(initCmd));}},400);}};
   ws.onmessage=function(e){{
+    if(!(e.data instanceof ArrayBuffer)){{
+      try{{
+        var msg=JSON.parse(e.data);
+        if(msg.type==='init'){{
+          obj.name=msg.name;
+          tlabel.textContent=msg.name;
+          te.title=msg.name;
+          return;
+        }}
+      }}catch(ex){{}}
+    }}
+    clearTimeout(obj.runTimer);
+    if(act===id){{
+      setTabState(obj,'running');
+      obj.runTimer=setTimeout(function(){{setTabState(obj,'idle');}},1500);
+    }}else{{
+      setTabState(obj,'attention');
+    }}
     term.write(e.data instanceof ArrayBuffer?new Uint8Array(e.data):e.data);
   }};
-  ws.onclose=function(){{if(tabs.some(function(t){{return t.id===id;}}))ct(id);}};
+  ws.onclose=function(){{
+    if(wsReady&&tabs.some(function(t){{return t.id===id;}}))ct(id,false);
+  }};
   term.onData(function(d){{if(ws.readyState===1)ws.send(new TextEncoder().encode(d));}});
   term.onResize(function(){{rsz(ws,term);}});
-  term.onTitleChange(function(title){{
-    if(!title)return;
-    tlabel.textContent=title;te.title=title;
-  }});
+  term.onTitleChange(function(title){{if(!title)return;tlabel.textContent=title;te.title=title;}});
   term.attachCustomKeyEventHandler(function(e){{
     if(e.type!=='keydown')return true;
     if(e.metaKey&&e.key==='c'){{
-      if(term.hasSelection()){{
-        window.webkit.messageHandlers.copy.postMessage(term.getSelection());
-        return false;
-      }}
+      if(term.hasSelection()){{window.webkit.messageHandlers.copy.postMessage(term.getSelection());return false;}}
       return true;
     }}
-    if(e.metaKey&&e.key==='v'){{
-      window.webkit.messageHandlers.paste.postMessage(null);
-      return false;
-    }}
+    if(e.metaKey&&e.key==='v'){{window.webkit.messageHandlers.paste.postMessage(null);return false;}}
     return true;
   }});
-  new ResizeObserver(function(){{
-    if(act===id){{fa.fit();rsz(ws,term);}}
-  }}).observe(tw);
-  tabs.push({{id:id,term:term,fa:fa,ws:ws,tw:tw,te:te}});
+  new ResizeObserver(function(){{if(act===id){{fa.fit();rsz(ws,term);}}}}).observe(tw);
+  tabs.push(obj);
   sw(id);
   if(spOpen)setTimeout(refreshSessions,800);
 }}
@@ -366,14 +459,17 @@ function sw(id){{
     var on=t.id===id;
     t.tw.classList.toggle('on',on);
     t.te.classList.toggle('on',on);
-    if(on){{t.fa.fit();t.term.focus();}}
+    if(on){{t.fa.fit();t.term.focus();if(t.state==='attention')setTabState(t,'idle');}}
   }});
 }}
 
-function ct(id){{
+function ct(id,doKill){{
   var i=tabs.findIndex(function(t){{return t.id===id;}});
   if(i<0)return;
   var t=tabs[i];
+  if(doKill&&t.name)ctrlSend({{action:'kill',name:t.name}},function(){{if(spOpen)refreshSessions();}});
+  else if(spOpen)setTimeout(refreshSessions,500);
+  clearTimeout(t.runTimer);
   try{{t.ws.close();}}catch(e){{}}
   t.tw.remove();t.te.remove();tabs.splice(i,1);
   if(!tabs.length)nt();else sw(tabs[Math.max(0,i-1)].id);
@@ -381,12 +477,16 @@ function ct(id){{
 
 document.addEventListener('keydown',function(e){{
   if(e.metaKey&&e.key==='t'){{e.preventDefault();nt();}}
-  if(e.metaKey&&e.key==='w'){{e.preventDefault();if(act!==null)ct(act);}}
+  if(e.metaKey&&e.key==='w'){{e.preventDefault();if(act!==null)showCloseMenu({{clientX:0,clientY:36,stopPropagation:function(){{}}}},act);}}
   var k=parseInt(e.key);
   if(e.metaKey&&!isNaN(k)&&k>=1&&k<=9){{var t=tabs[k-1];if(t)sw(t.id);}}
 }});
 
 nt();
+setTimeout(function(){{
+  try{{window.webkit.messageHandlers.log.postMessage('bridge-ok');}}catch(e){{}}
+  updateMenuBarState();
+}}, 1000);
 </script>
 </body></html>
 """
@@ -394,6 +494,19 @@ nt();
 # ── PTY session ───────────────────────────────────────────────────────────────
 
 _tmux_session_counter = 0
+_tmux_titles_configured = False
+
+def _ensure_tmux_titles() -> None:
+    """Configure tmux to forward pane title changes to the outer terminal."""
+    global _tmux_titles_configured
+    if _tmux_titles_configured:
+        return
+    _tmux_titles_configured = True
+    _tmux("set-option", "-g", "allow-passthrough",  "on")
+    _tmux("set-option", "-g", "set-titles",        "on")
+    _tmux("set-option", "-g", "set-titles-string",  "#{pane_title}")
+    _tmux("set-option", "-g", "allow-rename",       "on")
+    _tmux("set-option", "-g", "automatic-rename",   "on")
 
 class PTYSession:
     """One pseudo-terminal. Runs tmux if available, bare shell as fallback."""
@@ -406,15 +519,16 @@ class PTYSession:
 
         if TMUX and os.path.exists(TMUX):
             if attach_to:
+                self.name = attach_to
                 cmd = [TMUX, "attach-session", "-t", attach_to]
             else:
                 _tmux_session_counter += 1
-                sname = f"tab-{_tmux_session_counter}"
-                # -A: attach if name exists, else create new
-                cmd = [TMUX, "new-session", "-A", "-s", sname]
+                self.name = f"tab-{_tmux_session_counter}"
+                cmd = [TMUX, "new-session", "-A", "-s", self.name]
             exe = TMUX
         else:
             shell = os.environ.get("SHELL", "/bin/zsh")
+            self.name = "shell"
             cmd = [shell, "-l"]
             exe = shell
 
@@ -423,6 +537,9 @@ class PTYSession:
             os.execve(exe, cmd, env)
         fl = fcntl.fcntl(self.fd, fcntl.F_GETFL)
         fcntl.fcntl(self.fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+        if TMUX and os.path.exists(TMUX):
+            time.sleep(0.15)   # let tmux server start before configuring
+            _ensure_tmux_titles()
 
     def resize(self, rows: int, cols: int) -> None:
         try:
@@ -482,6 +599,7 @@ async def pty_handler(ws, *_) -> None:
     session = _sessions[key]
     session.clients.add(ws)
     session.start_loop()
+    await ws.send(json.dumps({"type": "init", "name": session.name}))
 
     try:
         async for msg in ws:
@@ -534,6 +652,20 @@ async def ws_router(ws, *args) -> None:
 
 # ── macOS UI ──────────────────────────────────────────────────────────────────
 
+_app_delegate_ref = None   # set in applicationDidFinishLaunching_
+
+def _make_dot_image(color, size=18):
+    """Draw a filled circle in the given color; non-template so macOS shows real color."""
+    img = NSImage.alloc().initWithSize_(NSMakeSize(size, size))
+    img.lockFocus()
+    color.set()
+    NSBezierPath.bezierPathWithOvalInRect_(NSMakeRect(2, 2, size - 4, size - 4)).fill()
+    img.unlockFocus()
+    img.setTemplate_(False)
+    return img
+
+_STATUS_IMAGES = {}   # lazily populated on first STATUS message (needs AppKit running)
+
 class _ClipboardBridge(NSObject):
     def setWebView_(self, wv):
         self._wv = wv
@@ -550,6 +682,23 @@ class _ClipboardBridge(NSObject):
             pb = NSPasteboard.generalPasteboard()
             pb.clearContents()
             pb.setString_forType_(text, NSPasteboardTypeString)
+        elif name == "log":
+            text = str(msg.body() or "")
+            _diag_log.append({"msg": text, "t": time.time()})
+            print(f"[DIAG] {text}", flush=True)
+        elif name == "status":
+            state = str(msg.body() or "idle")
+            try:
+                if not _STATUS_IMAGES:
+                    _STATUS_IMAGES["idle"]      = _make_dot_image(NSColor.colorWithSRGBRed_green_blue_alpha_(0.40, 0.42, 0.44, 1.0))
+                    _STATUS_IMAGES["running"]   = _make_dot_image(NSColor.colorWithSRGBRed_green_blue_alpha_(0.18, 0.80, 0.44, 1.0))
+                    _STATUS_IMAGES["attention"] = _make_dot_image(NSColor.colorWithSRGBRed_green_blue_alpha_(1.00, 0.58, 0.00, 1.0))
+                if _app_delegate_ref is not None:
+                    btn = _app_delegate_ref._item.button()
+                    btn.setImage_(_STATUS_IMAGES.get(state, _STATUS_IMAGES["idle"]))
+                    btn.setImagePosition_(NSImageLeft)
+            except Exception as e:
+                print(f"[STATUS] error: {e}", flush=True)
 
 
 class TerminalViewController(NSViewController):
@@ -557,13 +706,13 @@ class TerminalViewController(NSViewController):
         frame = NSMakeRect(0, 0, 960, 620)
         view = NSView.alloc().initWithFrame_(frame)
         view.setWantsLayer_(True)
-        view.layer().setBackgroundColor_(
-            NSColor.colorWithCalibratedRed_green_blue_alpha_(0.05, 0.07, 0.09, 1.0).CGColor())
 
         ucc = WKUserContentController.alloc().init()
         self._bridge = _ClipboardBridge.alloc().init()
         ucc.addScriptMessageHandler_name_(self._bridge, "paste")
         ucc.addScriptMessageHandler_name_(self._bridge, "copy")
+        ucc.addScriptMessageHandler_name_(self._bridge, "log")
+        ucc.addScriptMessageHandler_name_(self._bridge, "status")
 
         cfg = WKWebViewConfiguration.alloc().init()
         cfg.setUserContentController_(ucc)
@@ -583,6 +732,8 @@ class TerminalViewController(NSViewController):
 
 class AppDelegate(NSObject):
     def applicationDidFinishLaunching_(self, _notif):
+        global _app_delegate_ref
+        _app_delegate_ref = self
         self._popover = None
         sb = NSStatusBar.systemStatusBar()
         self._item = sb.statusItemWithLength_(NSVariableStatusItemLength)
@@ -621,10 +772,20 @@ class AppDelegate(NSObject):
 
 # ── HTTP server (serves the HTML so CDN scripts load from a real origin) ─────
 
+_diag_log: list = []
+
 class _HTMLHandler(BaseHTTPRequestHandler):
     _types = {".js": "text/javascript", ".css": "text/css"}
 
     def do_GET(self):
+        if self.path == "/diag":
+            body = json.dumps(_diag_log).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         name = self.path.lstrip("/")
         if name in _assets:
             body = _assets[name]
@@ -635,8 +796,22 @@ class _HTMLHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", ct)
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length)
+        try:
+            entry = json.loads(body)
+            _diag_log.append(entry)
+            print(f"[DIAG] {entry.get('msg','')}", flush=True)
+        except Exception:
+            pass
+        self.send_response(200)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def log_message(self, *_): pass
 
