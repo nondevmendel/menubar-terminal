@@ -90,6 +90,58 @@ def _list_sessions():
 
     return sessions
 
+# ── session persistence ───────────────────────────────────────────────────────
+
+_SAVED_SESSIONS_PATH = os.path.join(_CACHE_DIR, "saved_sessions.json")
+
+def _get_session_cwds() -> dict:
+    """Return {session_name: cwd} for each session's active pane."""
+    out = _tmux("list-panes", "-a", "-F",
+                "#{session_name}|#{pane_active}|#{window_active}|#{pane_current_path}")
+    cwds: dict = {}
+    for line in out.splitlines():
+        parts = line.split("|", 3)
+        if len(parts) == 4 and parts[1] == "1" and parts[2] == "1":
+            cwds[parts[0]] = parts[3]
+    return cwds
+
+def _save_sessions() -> None:
+    sessions = _list_sessions()
+    if not sessions:
+        return
+    cwds = _get_session_cwds()
+    payload = [
+        {"name": s["name"], "cwd": cwds.get(s["name"], os.path.expanduser("~"))}
+        for s in sessions
+    ]
+    try:
+        with open(_SAVED_SESSIONS_PATH, "w") as f:
+            json.dump(payload, f)
+    except Exception as e:
+        print(f"[menubar-terminal] save-sessions error: {e}", flush=True)
+
+def _restore_sessions() -> None:
+    if not os.path.exists(_SAVED_SESSIONS_PATH):
+        return
+    try:
+        with open(_SAVED_SESSIONS_PATH) as f:
+            saved = json.load(f)
+    except Exception:
+        return
+    existing = {s["name"] for s in _list_sessions()}
+    restored = 0
+    for s in saved:
+        name = s.get("name", "")
+        cwd  = s.get("cwd", os.path.expanduser("~"))
+        if name and name not in existing:
+            if os.path.isdir(cwd):
+                _tmux("new-session", "-d", "-s", name, "-c", cwd)
+            else:
+                _tmux("new-session", "-d", "-s", name)
+            restored += 1
+    if restored:
+        print(f"[menubar-terminal] restored {restored} session(s)", flush=True)
+
 # ── port helpers ──────────────────────────────────────────────────────────────
 def _free_port(start=57231):
     for p in range(start, start + 200):
@@ -629,10 +681,12 @@ async def control_handler(ws, *_) -> None:
                     sessions = await asyncio.get_running_loop().run_in_executor(
                         None, _list_sessions)
                     await ws.send(json.dumps({"type": "sessions", "data": sessions}))
+                    await asyncio.get_running_loop().run_in_executor(None, _save_sessions)
                 elif action == "kill":
                     name = cmd.get("name", "")
                     await asyncio.get_running_loop().run_in_executor(
                         None, lambda: _tmux("kill-session", "-t", name))
+                    await asyncio.get_running_loop().run_in_executor(None, _save_sessions)
                 elif action == "detach":
                     name = cmd.get("name", "")
                     await asyncio.get_running_loop().run_in_executor(
@@ -809,11 +863,18 @@ class _HTMLHandler(BaseHTTPRequestHandler):
 # ── server thread ─────────────────────────────────────────────────────────────
 
 def _run_ws_server() -> None:
+    async def _periodic_save():
+        while True:
+            await asyncio.sleep(30)
+            await asyncio.get_running_loop().run_in_executor(None, _save_sessions)
+
     async def _main():
+        _restore_sessions()
         http = HTTPServer(("127.0.0.1", HTTP_PORT), _HTMLHandler)
         threading.Thread(target=http.serve_forever, daemon=True).start()
         async with websockets.serve(ws_router, "127.0.0.1", WS_PORT):
             print(f"[menubar-terminal] http://127.0.0.1:{HTTP_PORT}  ws://127.0.0.1:{WS_PORT}")
+            asyncio.ensure_future(_periodic_save())
             await asyncio.Future()
     asyncio.run(_main())
 
