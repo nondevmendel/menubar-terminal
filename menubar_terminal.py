@@ -94,8 +94,19 @@ def _list_sessions():
 
 _SAVED_SESSIONS_PATH = os.path.join(_CACHE_DIR, "saved_sessions.json")
 
+_RESURRECT_SCRIPTS = os.path.expanduser("~/.tmux/plugins/tmux-resurrect/scripts")
+_RESURRECT_SAVE_SH  = os.path.join(_RESURRECT_SCRIPTS, "save.sh")
+_RESURRECT_RESTORE_SH = os.path.join(_RESURRECT_SCRIPTS, "restore.sh")
+_RESURRECT_LAST = os.path.expanduser("~/.tmux/resurrect/last")
+
+_sessions_were_restored: bool = False   # frontend reads this to open the panel
+
+
+def _resurrect_available() -> bool:
+    return os.path.exists(_RESURRECT_SAVE_SH) and os.path.exists(_RESURRECT_RESTORE_SH)
+
+
 def _get_session_cwds() -> dict:
-    """Return {session_name: cwd} for each session's active pane."""
     out = _tmux("list-panes", "-a", "-F",
                 "#{session_name}|#{pane_active}|#{window_active}|#{pane_current_path}")
     cwds: dict = {}
@@ -105,7 +116,8 @@ def _get_session_cwds() -> dict:
             cwds[parts[0]] = parts[3]
     return cwds
 
-def _save_sessions() -> None:
+
+def _save_sessions_simple() -> None:
     sessions = _list_sessions()
     if not sessions:
         return
@@ -120,7 +132,21 @@ def _save_sessions() -> None:
     except Exception as e:
         print(f"[menubar-terminal] save-sessions error: {e}", flush=True)
 
-def _restore_sessions() -> None:
+
+def _save_sessions() -> None:
+    if _resurrect_available() and _list_sessions():
+        try:
+            env = {**os.environ, "HOME": os.path.expanduser("~")}
+            subprocess.run(["bash", _RESURRECT_SAVE_SH],
+                           capture_output=True, timeout=15, env=env)
+            print("[menubar-terminal] tmux-resurrect: saved", flush=True)
+            return
+        except Exception as e:
+            print(f"[menubar-terminal] resurrect save error: {e}", flush=True)
+    _save_sessions_simple()
+
+
+def _restore_sessions_simple() -> None:
     if not os.path.exists(_SAVED_SESSIONS_PATH):
         return
     try:
@@ -140,7 +166,36 @@ def _restore_sessions() -> None:
                 _tmux("new-session", "-d", "-s", name)
             restored += 1
     if restored:
-        print(f"[menubar-terminal] restored {restored} session(s)", flush=True)
+        print(f"[menubar-terminal] restored {restored} session(s) (simple)", flush=True)
+
+
+def _restore_sessions() -> None:
+    global _sessions_were_restored
+    # If sessions already exist (server survived a crash), nothing to do.
+    if _list_sessions():
+        return
+    if _resurrect_available() and os.path.exists(_RESURRECT_LAST):
+        try:
+            _tmux("start-server")
+            time.sleep(0.2)
+            env = {**os.environ, "HOME": os.path.expanduser("~")}
+            subprocess.run(["bash", _RESURRECT_RESTORE_SH],
+                           capture_output=True, timeout=20, env=env)
+            time.sleep(0.6)
+            restored = _list_sessions()
+            if restored:
+                print(f"[menubar-terminal] tmux-resurrect: restored "
+                      f"{len(restored)} session(s)", flush=True)
+                _sessions_were_restored = True
+                return
+        except Exception as e:
+            print(f"[menubar-terminal] resurrect restore error: {e}", flush=True)
+    # Fallback: simple JSON-based restore
+    before = {s["name"] for s in _list_sessions()}
+    _restore_sessions_simple()
+    after  = {s["name"] for s in _list_sessions()}
+    if after - before:
+        _sessions_were_restored = True
 
 # ── port helpers ──────────────────────────────────────────────────────────────
 def _free_port(start=57231):
@@ -534,7 +589,17 @@ document.addEventListener('keydown',function(e){{
   if(e.metaKey&&!isNaN(k)&&k>=1&&k<=9){{var t=tabs[k-1];if(t)sw(t.id);}}
 }});
 
-nt();
+fetch('/api/status').then(function(r){{return r.json();}}).then(function(s){{
+  if(s.restored){{
+    toggleSessions();
+    setTimeout(function(){{
+      var first=document.querySelector('.sbtn:not(.kill)');
+      if(first)first.click();
+    }},600);
+  }}else{{
+    nt();
+  }}
+}}).catch(function(){{nt();}});
 setTimeout(function(){{
   try{{window.webkit.messageHandlers.log.postMessage('bridge-ok');}}catch(e){{}}
   updateMenuBarState();
@@ -831,6 +896,14 @@ class _HTMLHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if self.path == "/api/status":
+            body = json.dumps({"restored": _sessions_were_restored}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         name = self.path.lstrip("/")
         if name in _assets:
             body = _assets[name]
@@ -865,7 +938,7 @@ class _HTMLHandler(BaseHTTPRequestHandler):
 def _run_ws_server() -> None:
     async def _periodic_save():
         while True:
-            await asyncio.sleep(30)
+            await asyncio.sleep(300)  # every 5 minutes
             await asyncio.get_running_loop().run_in_executor(None, _save_sessions)
 
     async def _main():
@@ -882,6 +955,10 @@ def _run_ws_server() -> None:
 
 if __name__ == "__main__":
     signal.signal(signal.SIGINT, signal.SIG_DFL)
+    def _on_sigterm(_sig, _frame):
+        _save_sessions()
+        sys.exit(0)
+    signal.signal(signal.SIGTERM, _on_sigterm)
     threading.Thread(target=_run_ws_server, daemon=True).start()
     time.sleep(0.4)
 
