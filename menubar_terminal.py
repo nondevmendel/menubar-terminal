@@ -279,7 +279,7 @@ html,body{{height:100%;background:#0d1117;display:flex;flex-direction:column;ove
 #terms{{flex:1;position:relative;overflow:hidden}}
 .tw{{position:absolute;inset:0;display:none}}
 .tw.on{{display:block}}
-.xterm,.xterm-screen,.xterm-viewport{{height:100%!important}}
+.xterm,.xterm-screen{{height:100%!important}}
 
 /* ── sessions panel (right drawer) ── */
 #sp{{width:0;overflow:hidden;transition:width .2s ease;
@@ -465,6 +465,25 @@ function killSession(name){{
 function newSession(){{nt();}}
 
 /* ── terminal tabs ── */
+/* ── reconnect a frozen tab ── */
+function reconnect(obj){{
+  var wsUrl=obj.name
+    ?'ws://127.0.0.1:{WS_PORT}/attach/'+encodeURIComponent(obj.name)
+    :'ws://127.0.0.1:{WS_PORT}/new';
+  var ws=new WebSocket(wsUrl);
+  ws.binaryType='arraybuffer';
+  obj.ws=ws;
+  obj.term.writeln('\\r\\n\\x1b[33m[reconnecting…]\\x1b[0m');
+  ws.onopen=function(){{obj.fa.fit();rsz(ws,obj.term);}};
+  ws.onmessage=function(e){{
+    clearTimeout(obj.runTimer);
+    if(act===obj.id){{setTabState(obj,'running');obj.runTimer=setTimeout(function(){{setTabState(obj,'idle');}},1500);}}
+    else{{setTabState(obj,'attention');}}
+    obj.term.write(e.data instanceof ArrayBuffer?new Uint8Array(e.data):e.data);
+  }};
+  ws.onclose=function(){{if(tabs.some(function(t){{return t.id===obj.id;}}))ct(obj.id,false);}};
+}}
+
 function ntClaude(){{nt(null,'claude\\n');}}
 function nt(attachTo,initCmd){{
   var id=++n;
@@ -538,10 +557,10 @@ function nt(attachTo,initCmd){{
     term.write(e.data instanceof ArrayBuffer?new Uint8Array(e.data):e.data);
   }};
   ws.onclose=function(){{
-    if(wsReady&&tabs.some(function(t){{return t.id===id;}}))ct(id,false);
+    if(wsReady&&obj.ws===ws&&tabs.some(function(t){{return t.id===id;}}))ct(id,false);
   }};
-  term.onData(function(d){{if(ws.readyState===1)ws.send(new TextEncoder().encode(d));}});
-  term.onResize(function(){{rsz(ws,term);}});
+  term.onData(function(d){{if(obj.ws.readyState===1)obj.ws.send(new TextEncoder().encode(d));else if(obj.ws.readyState>1)reconnect(obj);}});
+  term.onResize(function(){{rsz(obj.ws,term);}});
   term.onTitleChange(function(title){{if(!title)return;tlabel.textContent=title;te.title=title;}});
   term.attachCustomKeyEventHandler(function(e){{
     if(e.type!=='keydown')return true;
@@ -552,7 +571,8 @@ function nt(attachTo,initCmd){{
     if(e.metaKey&&e.key==='v'){{window.webkit.messageHandlers.paste.postMessage(null);return false;}}
     return true;
   }});
-  new ResizeObserver(function(){{if(act===id){{fa.fit();rsz(ws,term);}}}}).observe(tw);
+  new ResizeObserver(function(){{if(act===id){{fa.fit();rsz(obj.ws,term);}}}}).observe(tw);
+  tw.addEventListener('wheel',function(e){{e.preventDefault();term.scrollLines(e.deltaY>0?3:-3);}},{{passive:false}});
   tabs.push(obj);
   sw(id);
   if(spOpen)setTimeout(refreshSessions,800);
@@ -757,7 +777,6 @@ async def control_handler(ws, *_) -> None:
                     sessions = await asyncio.get_running_loop().run_in_executor(
                         None, _list_sessions)
                     await ws.send(json.dumps({"type": "sessions", "data": sessions}))
-                    await asyncio.get_running_loop().run_in_executor(None, _save_sessions)
                 elif action == "kill":
                     name = cmd.get("name", "")
                     await asyncio.get_running_loop().run_in_executor(

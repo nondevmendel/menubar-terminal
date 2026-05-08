@@ -10,7 +10,7 @@
   <array>
     <string>/usr/bin/python3</string>
     <string>-u</string>
-    <string>/Users/YOUR_USERNAME/menubar-terminal/menubar_terminal.py</string>
+    <string>/Users/mendelrosenberg/Desktop/claude/menubar-terminal/menubar_terminal.py</string>
   </array>
 
   <key>RunAtLoad</key>
@@ -30,7 +30,7 @@
     <key>PATH</key>
     <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     <key>HOME</key>
-    <string>/Users/YOUR_USERNAME</string>
+    <string>/Users/mendelrosenberg</string>
     <key>PYTHONUNBUFFERED</key>
     <string>1</string>
   </dict>
