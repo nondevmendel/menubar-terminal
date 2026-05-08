@@ -12,7 +12,7 @@ Run:       python3 ~/menubar_terminal.py &
 Auto-start: load ~/Library/LaunchAgents/com.user.menubar-terminal.plist
 """
 
-import sys, os, pty, asyncio, threading, json, shutil, urllib.request
+import sys, os, pty, asyncio, threading, json, shutil, urllib.request, shlex
 import select, struct, fcntl, termios, time, socket, signal, subprocess
 
 # ── single-instance lock ──────────────────────────────────────────────────────
@@ -29,7 +29,7 @@ def _pip(*pkgs):
     subprocess.run([sys.executable, "-m", "pip", "install", "--quiet", *pkgs], check=True)
 
 import subprocess
-try:    import objc                       # noqa: F401
+try:    import objc
 except: _pip("pyobjc-core","pyobjc-framework-Cocoa","pyobjc-framework-WebKit"); import objc
 try:    from AppKit import NSApplication  # noqa: F401
 except: _pip("pyobjc-framework-Cocoa")
@@ -45,6 +45,8 @@ from AppKit import (
     NSColor, NSMakeRect, NSPasteboard, NSPasteboardTypeString,
     NSApplicationActivationPolicyAccessory, NSVariableStatusItemLength,
     NSFont, NSForegroundColorAttributeName, NSFontAttributeName,
+    NSFilenamesPboardType, NSDragOperationCopy, NSDragOperationNone,
+    NSEventModifierFlagCommand,
 )
 from Foundation import NSMutableAttributedString
 from WebKit import WKWebView, WKWebViewConfiguration, WKUserContentController
@@ -171,8 +173,9 @@ def _restore_sessions_simple() -> None:
 
 def _restore_sessions() -> None:
     global _sessions_were_restored
-    # If sessions already exist (server survived a crash), nothing to do.
+    # If sessions already exist (server survived a crash), just sync the counter.
     if _list_sessions():
+        _sync_session_counter()
         return
     if _resurrect_available() and os.path.exists(_RESURRECT_LAST):
         try:
@@ -187,6 +190,7 @@ def _restore_sessions() -> None:
                 print(f"[menubar-terminal] tmux-resurrect: restored "
                       f"{len(restored)} session(s)", flush=True)
                 _sessions_were_restored = True
+                _sync_session_counter()
                 return
         except Exception as e:
             print(f"[menubar-terminal] resurrect restore error: {e}", flush=True)
@@ -196,6 +200,7 @@ def _restore_sessions() -> None:
     after  = {s["name"] for s in _list_sessions()}
     if after - before:
         _sessions_were_restored = True
+    _sync_session_counter()
 
 # ── port helpers ──────────────────────────────────────────────────────────────
 def _free_port(start=57231):
@@ -590,15 +595,7 @@ document.addEventListener('keydown',function(e){{
 }});
 
 fetch('/api/status').then(function(r){{return r.json();}}).then(function(s){{
-  if(s.restored){{
-    toggleSessions();
-    setTimeout(function(){{
-      var first=document.querySelector('.sbtn:not(.kill)');
-      if(first)first.click();
-    }},600);
-  }}else{{
-    nt();
-  }}
+  if(s.restored){{toggleSessions();}}else{{nt();}}
 }}).catch(function(){{nt();}});
 setTimeout(function(){{
   try{{window.webkit.messageHandlers.log.postMessage('bridge-ok');}}catch(e){{}}
@@ -612,6 +609,20 @@ setTimeout(function(){{
 
 _tmux_session_counter = 0
 _tmux_titles_configured = False
+
+
+def _sync_session_counter() -> None:
+    """Advance the counter past any existing tab-N sessions to avoid collisions."""
+    global _tmux_session_counter
+    for s in _list_sessions():
+        name = s["name"]
+        if name.startswith("tab-"):
+            try:
+                n = int(name[4:])
+                if n > _tmux_session_counter:
+                    _tmux_session_counter = n
+            except ValueError:
+                pass
 
 def _ensure_tmux_titles() -> None:
     """Configure tmux to forward pane title changes to the outer terminal."""
@@ -641,7 +652,7 @@ class PTYSession:
             else:
                 _tmux_session_counter += 1
                 self.name = f"tab-{_tmux_session_counter}"
-                cmd = [TMUX, "new-session", "-A", "-s", self.name]
+                cmd = [TMUX, "new-session", "-s", self.name]
             exe = TMUX
         else:
             shell = os.environ.get("SHELL", "/bin/zsh")
@@ -811,6 +822,54 @@ class _ClipboardBridge(NSObject):
                 print(f"[STATUS] error: {e}", flush=True)
 
 
+class TerminalWKWebView(WKWebView):
+    """WKWebView subclass that intercepts ⌘C/⌘V and accepts file drops."""
+
+    # ── keyboard ──────────────────────────────────────────────────────────────
+
+    def performKeyEquivalent_(self, event):
+        if event.modifierFlags() & NSEventModifierFlagCommand:
+            key = event.charactersIgnoringModifiers() or ''
+            if key == 'v':
+                self.evaluateJavaScript_completionHandler_(
+                    "window.webkit.messageHandlers.paste.postMessage(null);", None)
+                return True
+            if key == 'c':
+                self.evaluateJavaScript_completionHandler_(
+                    "(function(){var t=tabs&&tabs.find(function(t){return t.id===act;});"
+                    "if(t&&t.term&&t.term.hasSelection())"
+                    "{window.webkit.messageHandlers.copy.postMessage(t.term.getSelection());}})()",
+                    None)
+                return True
+        return objc.super(TerminalWKWebView, self).performKeyEquivalent_(event)
+
+    # ── drag & drop ───────────────────────────────────────────────────────────
+
+    def draggingEntered_(self, sender):
+        if NSFilenamesPboardType in (sender.draggingPasteboard().types() or []):
+            return NSDragOperationCopy
+        return objc.super(TerminalWKWebView, self).draggingEntered_(sender)
+
+    def draggingUpdated_(self, sender):
+        if NSFilenamesPboardType in (sender.draggingPasteboard().types() or []):
+            return NSDragOperationCopy
+        return objc.super(TerminalWKWebView, self).draggingUpdated_(sender)
+
+    def prepareForDragOperation_(self, sender):
+        if NSFilenamesPboardType in (sender.draggingPasteboard().types() or []):
+            return True
+        return objc.super(TerminalWKWebView, self).prepareForDragOperation_(sender)
+
+    def performDragOperation_(self, sender):
+        files = sender.draggingPasteboard().propertyListForType_(NSFilenamesPboardType)
+        if files:
+            text = ' '.join(shlex.quote(str(f)) for f in files) + ' '
+            js = f"if(window._termPaste)window._termPaste({json.dumps(text)})"
+            self.evaluateJavaScript_completionHandler_(js, None)
+            return True
+        return objc.super(TerminalWKWebView, self).performDragOperation_(sender)
+
+
 class TerminalViewController(NSViewController):
     def loadView(self):
         frame = NSMakeRect(0, 0, 960, 620)
@@ -829,7 +888,8 @@ class TerminalViewController(NSViewController):
         try: cfg.preferences().setValue_forKey_(True, "developerExtrasEnabled")
         except: pass
 
-        wv = WKWebView.alloc().initWithFrame_configuration_(frame, cfg)
+        wv = TerminalWKWebView.alloc().initWithFrame_configuration_(frame, cfg)
+        wv.registerForDraggedTypes_([NSFilenamesPboardType])
         wv.setAutoresizingMask_(18)
         url = NSURL.URLWithString_(f"http://127.0.0.1:{HTTP_PORT}/")
         wv.loadRequest_(NSURLRequest.requestWithURL_(url))
