@@ -108,7 +108,7 @@ _sessions_were_restored: bool = False   # frontend reads this to open the panel
 
 
 def _resurrect_available() -> bool:
-    return os.path.exists(_RESURRECT_SAVE_SH) and os.path.exists(_RESURRECT_RESTORE_SH)
+    return False  # disabled: resurrect save.sh uses AppleScript, triggers macOS permission dialogs
 
 
 def _get_session_cwds() -> dict:
