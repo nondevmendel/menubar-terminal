@@ -94,6 +94,9 @@ def _list_sessions():
 
 # ── session persistence ───────────────────────────────────────────────────────
 
+_CACHE_DIR = os.path.expanduser("~/.menubar_terminal")
+os.makedirs(_CACHE_DIR, exist_ok=True)
+
 _SAVED_SESSIONS_PATH = os.path.join(_CACHE_DIR, "saved_sessions.json")
 
 _RESURRECT_SCRIPTS = os.path.expanduser("~/.tmux/plugins/tmux-resurrect/scripts")
@@ -214,9 +217,6 @@ WS_PORT   = _free_port(57231)
 HTTP_PORT = _free_port(57331)
 
 # ── local asset cache (xterm.js served from disk, no CDN in WKWebView) ────────
-
-_CACHE_DIR = os.path.expanduser("~/.menubar_terminal")
-os.makedirs(_CACHE_DIR, exist_ok=True)
 
 _CDN = {
     "xterm.js":     "https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js",
