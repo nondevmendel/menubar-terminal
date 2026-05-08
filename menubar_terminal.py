@@ -656,6 +656,11 @@ function nt(attachTo,initCmd,projectCwd){{
           te.title=msg.name;
           return;
         }}
+        if(msg.type==='title'){{
+          tlabel.textContent=msg.title;
+          te.title=msg.title;
+          return;
+        }}
       }}catch(ex){{}}
     }}
     clearTimeout(obj.runTimer);
@@ -755,13 +760,9 @@ def _sync_session_counter() -> None:
                 pass
 
 def _ensure_tmux_titles() -> None:
-    """Configure tmux to forward window name changes to the outer terminal via OSC 2.
-    Called on every new session so options survive a tmux server restart."""
-    _tmux("set-option", "-g", "allow-passthrough",  "on")
-    _tmux("set-option", "-g", "set-titles",        "on")
-    _tmux("set-option", "-g", "set-titles-string",  "#{window_name}")
-    _tmux("set-option", "-g", "allow-rename",       "on")
-    _tmux("set-option", "-g", "automatic-rename",   "on")
+    """Enable automatic window renaming so #{window_name} stays current."""
+    _tmux("set-option", "-g", "allow-rename",     "on")
+    _tmux("set-option", "-g", "automatic-rename", "on")
 
 class PTYSession:
     """One pseudo-terminal. Runs tmux if available, bare shell as fallback."""
@@ -829,6 +830,27 @@ class PTYSession:
             self._loop_running = True
             asyncio.ensure_future(self._read_loop())
 
+# ── title polling ─────────────────────────────────────────────────────────────
+
+async def _title_watcher(ws, session_name: str) -> None:
+    """Push tab title updates by polling tmux directly — no OSC 2 passthrough needed."""
+    last = ""
+    loop = asyncio.get_running_loop()
+    while True:
+        await asyncio.sleep(1)
+        try:
+            # Prefer the pane title (set by apps like Claude Code via OSC 2);
+            # fall back to the window name (kept current by automatic-rename).
+            title = await loop.run_in_executor(
+                None, lambda: _tmux(
+                    "display-message", "-p", "-t", session_name,
+                    "#{?#{==:#{pane_title},},#{window_name},#{pane_title}}"))
+            if title and title != last:
+                last = title
+                await ws.send(json.dumps({"type": "title", "title": title}))
+        except Exception:
+            return
+
 # ── WebSocket handlers ────────────────────────────────────────────────────────
 
 _sessions: dict = {}
@@ -861,6 +883,7 @@ async def pty_handler(ws, *_) -> None:
     session.start_loop()
     await ws.send(json.dumps({"type": "init", "name": session.name}))
 
+    watcher = asyncio.ensure_future(_title_watcher(ws, session.name))
     try:
         async for msg in ws:
             if isinstance(msg, bytes):
@@ -875,6 +898,7 @@ async def pty_handler(ws, *_) -> None:
     except Exception:
         pass
     finally:
+        watcher.cancel()
         session.clients.discard(ws)
 
 
