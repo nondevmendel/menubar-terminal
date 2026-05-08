@@ -12,7 +12,7 @@ Run:       python3 ~/menubar_terminal.py &
 Auto-start: load ~/Library/LaunchAgents/com.user.menubar-terminal.plist
 """
 
-import sys, os, pty, asyncio, threading, json, shutil, urllib.request, shlex
+import sys, os, pty, asyncio, threading, json, shutil, urllib.request, urllib.parse, shlex
 import select, struct, fcntl, termios, time, socket, signal, subprocess
 
 # ── single-instance lock ──────────────────────────────────────────────────────
@@ -105,6 +105,35 @@ _RESURRECT_RESTORE_SH = os.path.join(_RESURRECT_SCRIPTS, "restore.sh")
 _RESURRECT_LAST = os.path.expanduser("~/.tmux/resurrect/last")
 
 _sessions_were_restored: bool = False   # frontend reads this to open the panel
+
+# ── project shortcuts ─────────────────────────────────────────────────────────
+
+_PROJECTS_PATH = os.path.join(_CACHE_DIR, "projects.json")
+
+def _load_projects() -> list:
+    try:
+        with open(_PROJECTS_PATH) as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+def _save_projects(projects: list) -> None:
+    try:
+        with open(_PROJECTS_PATH, "w") as f:
+            json.dump(projects, f)
+    except Exception as e:
+        print(f"[menubar-terminal] save-projects error: {e}", flush=True)
+
+def _add_project(path: str) -> None:
+    path = os.path.expanduser(path.strip())
+    projects = _load_projects()
+    if not any(p["path"] == path for p in projects):
+        projects.append({"path": path, "name": os.path.basename(path) or path})
+        _save_projects(projects)
+
+def _remove_project(path: str) -> None:
+    projects = [p for p in _load_projects() if p["path"] != path]
+    _save_projects(projects)
 
 
 def _resurrect_available() -> bool:
@@ -312,6 +341,31 @@ html,body{{height:100%;background:#0d1117;display:flex;flex-direction:column;ove
          background:#21262d;color:#8b949e;font:12px -apple-system,sans-serif;cursor:pointer}}
 #sp-new:hover{{border-color:#3fb950;color:#3fb950}}
 #sp-empty{{padding:20px 14px;font:12px -apple-system,sans-serif;color:#484f58;text-align:center}}
+
+/* ── projects panel (right drawer) ── */
+#pp{{width:0;overflow:hidden;transition:width .2s ease;
+    background:#161b22;border-left:1px solid #30363d;
+    display:flex;flex-direction:column;flex-shrink:0}}
+#pp.open{{width:260px}}
+#pp-head{{padding:12px 14px 8px;font:600 12px -apple-system,sans-serif;
+          color:#8b949e;letter-spacing:.05em;text-transform:uppercase}}
+#pp-list{{flex:1;overflow-y:auto;padding:0 8px 8px}}
+.prow{{border-radius:6px;padding:8px 10px;margin-bottom:4px;
+      background:#0d1117;border:1px solid #21262d}}
+.prow:hover{{border-color:#30363d}}
+.pname{{font:600 13px -apple-system,sans-serif;color:#e6edf3;
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:3px}}
+.ppath{{font:10px -apple-system,sans-serif;color:#6e7681;margin-bottom:7px;
+       white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+#pp-foot{{padding:8px;display:flex;gap:5px}}
+#pp-input{{flex:1;min-width:0;padding:6px 8px;border-radius:5px;border:1px solid #30363d;
+          background:#21262d;color:#c9d1d9;font:12px -apple-system,sans-serif;outline:none}}
+#pp-input::placeholder{{color:#484f58}}
+#pp-input:focus{{border-color:#58a6ff}}
+#pp-browse,#pp-add-btn{{padding:6px 9px;border-radius:5px;border:1px solid #30363d;
+  background:#21262d;color:#8b949e;font:13px -apple-system,sans-serif;cursor:pointer;flex-shrink:0}}
+#pp-browse:hover,#pp-add-btn:hover{{border-color:#3fb950;color:#3fb950}}
+#pp-empty{{padding:20px 14px;font:12px -apple-system,sans-serif;color:#484f58;text-align:center}}
 </style>
 </head>
 <body>
@@ -319,6 +373,7 @@ html,body{{height:100%;background:#0d1117;display:flex;flex-direction:column;ove
   <button class="bar-btn" id="plus" onclick="nt()" title="New tab  ⌘T">+</button>
   <button class="bar-btn" id="claude-btn" onclick="ntClaude()" title="New Claude session"><svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="10" cy="13" rx="5" ry="3.5"/><path d="M5 12C2 11 1 8 2.5 7C3.5 6 4.5 7 5 10"/><path d="M15 12C18 11 19 8 17.5 7C16.5 6 15.5 7 15 10"/><line x1="6" y1="16" x2="4" y2="19"/><line x1="8.5" y1="16.5" x2="7.5" y2="19"/><line x1="11.5" y1="16.5" x2="12.5" y2="19"/><line x1="14" y1="16" x2="16" y2="19"/><circle cx="7.5" cy="9.5" r="1" fill="currentColor" stroke="none"/><circle cx="12.5" cy="9.5" r="1" fill="currentColor" stroke="none"/></svg></button>
   <div id="bar-right">
+    <button class="bar-btn" id="proj-btn" onclick="toggleProjects()" title="Projects">⊟</button>
     <button class="bar-btn" id="sess-btn" onclick="toggleSessions()" title="Sessions">⊞</button>
   </div>
 </div>
@@ -330,6 +385,15 @@ html,body{{height:100%;background:#0d1117;display:flex;flex-direction:column;ove
 </div>
 <div id="main">
   <div id="terms"></div>
+  <div id="pp">
+    <div id="pp-head">Projects</div>
+    <div id="pp-list"><div id="pp-empty">No projects saved</div></div>
+    <div id="pp-foot">
+      <input id="pp-input" type="text" placeholder="/path/to/project">
+      <button id="pp-browse" onclick="browseProject()" title="Browse folders">…</button>
+      <button id="pp-add-btn" onclick="addProjectInput()" title="Add">+</button>
+    </div>
+  </div>
   <div id="sp">
     <div id="sp-head">Sessions</div>
     <div id="sp-list"><div id="sp-empty">No sessions</div></div>
@@ -341,7 +405,7 @@ html,body{{height:100%;background:#0d1117;display:flex;flex-direction:column;ove
 <script src="/xterm.js"></script>
 <script src="/xterm-fit.js"></script>
 <script>
-var tabs=[],act=null,n=0,spOpen=false,spTimer=null;
+var tabs=[],act=null,n=0,spOpen=false,spTimer=null,ppOpen=false;
 
 function setTabState(obj,state){{
   obj.state=state;
@@ -406,15 +470,60 @@ function ctrlSend(obj,cb){{
 function refreshSessions(){{ctrlSend({{action:'list'}});}}
 
 /* ── sessions panel ── */
+function _resizeActive(){{
+  var t=tabs.find(function(t){{return t.id===act;}});
+  if(t)setTimeout(function(){{t.fa.fit();rsz(t.ws,t.term);}},250);
+}}
 function toggleSessions(){{
   spOpen=!spOpen;
   document.getElementById('sp').classList.toggle('open',spOpen);
   document.getElementById('sess-btn').classList.toggle('active',spOpen);
   if(spOpen){{refreshSessions();spTimer=setInterval(refreshSessions,3000);}}
   else{{clearInterval(spTimer);spTimer=null;}}
-  var t=tabs.find(function(t){{return t.id===act;}});
-  if(t)setTimeout(function(){{t.fa.fit();rsz(t.ws,t.term);}},250);
+  _resizeActive();
 }}
+function toggleProjects(){{
+  ppOpen=!ppOpen;
+  document.getElementById('pp').classList.toggle('open',ppOpen);
+  document.getElementById('proj-btn').classList.toggle('active',ppOpen);
+  if(ppOpen)refreshProjects();
+  _resizeActive();
+}}
+function refreshProjects(){{
+  fetch('/api/projects').then(function(r){{return r.json();}}).then(renderProjects).catch(function(){{}});
+}}
+function renderProjects(list){{
+  var el=document.getElementById('pp-list');
+  if(!list||!list.length){{el.innerHTML='<div id="pp-empty">No projects saved.<br><span style="font:10px -apple-system;color:#484f58">Add a path below or use … to browse.</span></div>';return;}}
+  el.innerHTML='';
+  list.forEach(function(p){{
+    var d=document.createElement('div');d.className='prow';
+    d.innerHTML='<div class="pname">'+esc(p.name)+'</div>'+
+      '<div class="ppath" title="'+esc(p.path)+'">'+esc(p.path)+'</div>'+
+      '<div class="pbtns">'+
+      '<button class="sbtn" data-path="'+esc(p.path)+'" onclick="openProject(this.dataset.path)">Open</button>'+
+      '<button class="sbtn kill" data-path="'+esc(p.path)+'" onclick="removeProject(this.dataset.path)">Remove</button>'+
+      '</div>';
+    el.appendChild(d);
+  }});
+}}
+function openProject(path){{nt(null,null,path);}}
+function removeProject(path){{
+  fetch('/api/projects',{{method:'DELETE',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{path:path}})}}).then(refreshProjects);
+}}
+function addProjectInput(){{
+  var inp=document.getElementById('pp-input');
+  var path=inp.value.trim();if(!path)return;
+  addProject(path);inp.value='';
+}}
+function addProject(path){{
+  if(!path)return;
+  fetch('/api/projects',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{path:path}})}}).then(refreshProjects);
+}}
+function browseProject(){{
+  try{{window.webkit.messageHandlers.browse.postMessage(null);}}catch(e){{}}
+}}
+document.getElementById('pp-input').addEventListener('keydown',function(e){{if(e.key==='Enter')addProjectInput();}});
 
 function renderSessions(list){{
   var el=document.getElementById('sp-list');
@@ -485,11 +594,13 @@ function reconnect(obj){{
 }}
 
 function ntClaude(){{nt(null,'claude\\n');}}
-function nt(attachTo,initCmd){{
+function nt(attachTo,initCmd,projectCwd){{
   var id=++n;
   var wsUrl=attachTo
     ?'ws://127.0.0.1:{WS_PORT}/attach/'+encodeURIComponent(attachTo)
-    :'ws://127.0.0.1:{WS_PORT}/new';
+    :(projectCwd
+      ?'ws://127.0.0.1:{WS_PORT}/new?cwd='+encodeURIComponent(projectCwd)
+      :'ws://127.0.0.1:{WS_PORT}/new');
 
   var te=document.createElement('div');
   te.className='tab';te.dataset.id=id;
@@ -628,7 +739,6 @@ setTimeout(function(){{
 # ── PTY session ───────────────────────────────────────────────────────────────
 
 _tmux_session_counter = 0
-_tmux_titles_configured = False
 
 
 def _sync_session_counter() -> None:
@@ -645,21 +755,18 @@ def _sync_session_counter() -> None:
                 pass
 
 def _ensure_tmux_titles() -> None:
-    """Configure tmux to forward pane title changes to the outer terminal."""
-    global _tmux_titles_configured
-    if _tmux_titles_configured:
-        return
-    _tmux_titles_configured = True
+    """Configure tmux to forward window name changes to the outer terminal via OSC 2.
+    Called on every new session so options survive a tmux server restart."""
     _tmux("set-option", "-g", "allow-passthrough",  "on")
     _tmux("set-option", "-g", "set-titles",        "on")
-    _tmux("set-option", "-g", "set-titles-string",  "#{pane_title}")
+    _tmux("set-option", "-g", "set-titles-string",  "#{window_name}")
     _tmux("set-option", "-g", "allow-rename",       "on")
     _tmux("set-option", "-g", "automatic-rename",   "on")
 
 class PTYSession:
     """One pseudo-terminal. Runs tmux if available, bare shell as fallback."""
 
-    def __init__(self, attach_to: str = None) -> None:
+    def __init__(self, attach_to: str = None, cwd: str = None) -> None:
         global _tmux_session_counter
         self.clients: set = set()
         self._loop_running = False
@@ -672,7 +779,8 @@ class PTYSession:
             else:
                 _tmux_session_counter += 1
                 self.name = f"tab-{_tmux_session_counter}"
-                cmd = [TMUX, "new-session", "-s", self.name, "-c", os.path.expanduser("~")]
+                start_dir = cwd if (cwd and os.path.isdir(cwd)) else os.path.expanduser("~")
+                cmd = [TMUX, "new-session", "-s", self.name, "-c", start_dir]
             exe = TMUX
         else:
             shell = os.environ.get("SHELL", "/bin/zsh")
@@ -733,7 +841,11 @@ def _ws_path(ws) -> str:
 
 async def pty_handler(ws, *_) -> None:
     """Handles /new and /attach/<name> — PTY I/O."""
-    path = _ws_path(ws).strip("/")          # e.g. "new" or "attach/my-session"
+    raw = _ws_path(ws)
+    parsed = urllib.parse.urlparse(raw)
+    path = parsed.path.strip("/")           # e.g. "new" or "attach/my-session"
+    qs = urllib.parse.parse_qs(parsed.query)
+    cwd = urllib.parse.unquote(qs.get("cwd", [""])[0]) or None
 
     if path.startswith("attach/"):
         attach_to = path[len("attach/"):]
@@ -742,7 +854,7 @@ async def pty_handler(ws, *_) -> None:
         _sessions[key] = session
     else:
         key = str(len(_sessions) + 1)
-        _sessions[key] = PTYSession()
+        _sessions[key] = PTYSession(cwd=cwd)
 
     session = _sessions[key]
     session.clients.add(ws)
@@ -820,6 +932,19 @@ class _ClipboardBridge(NSObject):
             pb = NSPasteboard.generalPasteboard()
             pb.clearContents()
             pb.setString_forType_(text, NSPasteboardTypeString)
+        elif name == "browse":
+            from AppKit import NSOpenPanel
+            panel = NSOpenPanel.openPanel()
+            panel.setCanChooseDirectories_(True)
+            panel.setCanChooseFiles_(False)
+            panel.setAllowsMultipleSelection_(False)
+            panel.setPrompt_("Add Project")
+            if panel.runModal() == 1:
+                url = panel.URL()
+                if url:
+                    path = str(url.path())
+                    js = f"addProject({json.dumps(path)})"
+                    self._wv.evaluateJavaScript_completionHandler_(js, None)
         elif name == "log":
             text = str(msg.body() or "")
             _diag_log.append({"msg": text, "t": time.time()})
@@ -901,6 +1026,7 @@ class TerminalViewController(NSViewController):
         ucc.addScriptMessageHandler_name_(self._bridge, "copy")
         ucc.addScriptMessageHandler_name_(self._bridge, "log")
         ucc.addScriptMessageHandler_name_(self._bridge, "status")
+        ucc.addScriptMessageHandler_name_(self._bridge, "browse")
 
         cfg = WKWebViewConfiguration.alloc().init()
         cfg.setUserContentController_(ucc)
@@ -983,6 +1109,14 @@ class _HTMLHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if self.path == "/api/projects":
+            body = json.dumps(_load_projects()).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         name = self.path.lstrip("/")
         if name in _assets:
             body = _assets[name]
@@ -997,18 +1131,36 @@ class _HTMLHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def do_POST(self):
+    def _read_json_body(self):
         length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(length)
         try:
-            entry = json.loads(body)
-            _diag_log.append(entry)
-            print(f"[DIAG] {entry.get('msg','')}", flush=True)
+            return json.loads(self.rfile.read(length))
         except Exception:
-            pass
+            return {}
+
+    def _ok(self):
         self.send_response(200)
         self.send_header("Content-Length", "0")
         self.end_headers()
+
+    def do_POST(self):
+        data = self._read_json_body()
+        if self.path == "/api/projects":
+            path = data.get("path", "").strip()
+            if path:
+                _add_project(path)
+        else:
+            _diag_log.append(data)
+            print(f"[DIAG] {data.get('msg','')}", flush=True)
+        self._ok()
+
+    def do_DELETE(self):
+        data = self._read_json_body()
+        if self.path == "/api/projects":
+            path = data.get("path", "").strip()
+            if path:
+                _remove_project(path)
+        self._ok()
 
     def log_message(self, *_): pass
 
