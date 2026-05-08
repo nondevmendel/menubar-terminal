@@ -672,7 +672,7 @@ class PTYSession:
             else:
                 _tmux_session_counter += 1
                 self.name = f"tab-{_tmux_session_counter}"
-                cmd = [TMUX, "new-session", "-s", self.name]
+                cmd = [TMUX, "new-session", "-s", self.name, "-c", os.path.expanduser("~")]
             exe = TMUX
         else:
             shell = os.environ.get("SHELL", "/bin/zsh")
