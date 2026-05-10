@@ -586,8 +586,8 @@ function reconnect(obj){{
   ws.onopen=function(){{obj.fa.fit();rsz(ws,obj.term);}};
   ws.onmessage=function(e){{
     clearTimeout(obj.runTimer);
-    if(act===obj.id){{setTabState(obj,'running');obj.runTimer=setTimeout(function(){{setTabState(obj,'idle');}},1500);}}
-    else{{setTabState(obj,'attention');}}
+    setTabState(obj,'running');
+    obj.runTimer=setTimeout(function(){{setTabState(obj,'idle');}},1500);
     obj.term.write(e.data instanceof ArrayBuffer?new Uint8Array(e.data):e.data);
   }};
   ws.onclose=function(){{if(tabs.some(function(t){{return t.id===obj.id;}}))ct(obj.id,false);}};
@@ -664,12 +664,8 @@ function nt(attachTo,initCmd,projectCwd){{
       }}catch(ex){{}}
     }}
     clearTimeout(obj.runTimer);
-    if(act===id){{
-      setTabState(obj,'running');
-      obj.runTimer=setTimeout(function(){{setTabState(obj,'idle');}},1500);
-    }}else{{
-      setTabState(obj,'attention');
-    }}
+    setTabState(obj,'running');
+    obj.runTimer=setTimeout(function(){{setTabState(obj,'idle');}},1500);
     term.write(e.data instanceof ArrayBuffer?new Uint8Array(e.data):e.data);
   }};
   ws.onclose=function(){{
