@@ -727,7 +727,10 @@ function nt(attachTo,initCmd,projectCwd){{
   tw.addEventListener('wheel',function(e){{
     e.preventDefault();e.stopPropagation();
     var goUp=e.deltaY<0;
-    var steps=Math.min(Math.max(1,Math.round(Math.abs(e.deltaY)/20)),8);
+    var requested=Math.min(Math.max(1,Math.round(Math.abs(e.deltaY)/20)),8);
+    var headroom=goUp?(SCROLL_MAX-obj.scrollPos):obj.scrollPos;
+    var steps=Math.min(requested,headroom);
+    if(steps<=0)return;
     var seq=new TextEncoder().encode('\x1b[<'+(goUp?64:65)+';1;1M');
     if(obj.ws&&obj.ws.readyState===1)for(var i=0;i<steps;i++)obj.ws.send(seq);
     obj.scrollPos=Math.max(0,Math.min(SCROLL_MAX,obj.scrollPos+(goUp?steps:-steps)));
