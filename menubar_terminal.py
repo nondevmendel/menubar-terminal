@@ -281,6 +281,10 @@ HTML = f"""\
 <style>
 *{{margin:0;padding:0;box-sizing:border-box}}
 html,body{{height:100%;background:#0d1117;display:flex;flex-direction:column;overflow:hidden}}
+::-webkit-scrollbar{{width:6px;height:6px}}
+::-webkit-scrollbar-track{{background:transparent}}
+::-webkit-scrollbar-thumb{{background:#484f58;border-radius:3px}}
+::-webkit-scrollbar-thumb:hover{{background:#6e7681}}
 
 /* ── tab bar ── */
 #bar{{display:flex;align-items:center;background:#161b22;border-bottom:1px solid #30363d;
@@ -309,6 +313,10 @@ html,body{{height:100%;background:#0d1117;display:flex;flex-direction:column;ove
 .tw{{position:absolute;inset:0;display:none}}
 .tw.on{{display:block}}
 .xterm,.xterm-screen{{height:100%!important}}
+.xterm-viewport::-webkit-scrollbar{{width:6px}}
+.xterm-viewport::-webkit-scrollbar-track{{background:transparent}}
+.xterm-viewport::-webkit-scrollbar-thumb{{background:#484f58;border-radius:3px}}
+.xterm-viewport::-webkit-scrollbar-thumb:hover{{background:#6e7681}}
 
 /* ── sessions panel (right drawer) ── */
 #sp{{width:0;overflow:hidden;transition:width .2s ease;
@@ -684,7 +692,12 @@ function nt(attachTo,initCmd,projectCwd){{
     return true;
   }});
   new ResizeObserver(function(){{if(act===id){{fa.fit();rsz(obj.ws,term);}}}}).observe(tw);
-  tw.addEventListener('wheel',function(e){{e.preventDefault();term.scrollLines(e.deltaY>0?3:-3);}},{{passive:false}});
+  tw.addEventListener('wheel',function(e){{
+    e.preventDefault();e.stopPropagation();
+    var seq=new TextEncoder().encode('\x1b[<'+(e.deltaY>0?65:64)+';1;1M');
+    var steps=Math.min(Math.max(1,Math.round(Math.abs(e.deltaY)/20)),8);
+    if(obj.ws&&obj.ws.readyState===1){{for(var i=0;i<steps;i++)obj.ws.send(seq);}}
+  }},{{passive:false,capture:true}});
   tabs.push(obj);
   sw(id);
   if(spOpen)setTimeout(refreshSessions,800);
@@ -759,6 +772,7 @@ def _ensure_tmux_titles() -> None:
     """Enable automatic window renaming so #{window_name} stays current."""
     _tmux("set-option", "-g", "allow-rename",     "on")
     _tmux("set-option", "-g", "automatic-rename", "on")
+    _tmux("set-option", "-g", "mouse",            "on")
 
 class PTYSession:
     """One pseudo-terminal. Runs tmux if available, bare shell as fallback."""
