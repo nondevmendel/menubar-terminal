@@ -313,10 +313,10 @@ html,body{{height:100%;background:#0d1117;display:flex;flex-direction:column;ove
 .tw{{position:absolute;inset:0;display:none}}
 .tw.on{{display:block}}
 .xterm,.xterm-screen{{height:100%!important}}
-.xterm-viewport::-webkit-scrollbar{{width:6px}}
-.xterm-viewport::-webkit-scrollbar-track{{background:transparent}}
-.xterm-viewport::-webkit-scrollbar-thumb{{background:#484f58;border-radius:3px}}
-.xterm-viewport::-webkit-scrollbar-thumb:hover{{background:#6e7681}}
+.xterm-viewport::-webkit-scrollbar{{display:none}}
+.tw>.xterm{{position:absolute;left:0;top:0;bottom:0;right:6px}}
+.tscroller{{position:absolute;right:0;top:0;bottom:0;width:6px;z-index:10}}
+.tthumb{{position:absolute;right:0;width:6px;background:#484f58;border-radius:3px;cursor:ns-resize}}
 
 /* ── sessions panel (right drawer) ── */
 #sp{{width:0;overflow:hidden;transition:width .2s ease;
@@ -648,7 +648,39 @@ function nt(attachTo,initCmd,projectCwd){{
   }}catch(e){{tw.style.display='';return;}}
   tw.style.display='';
 
-  var obj={{id:id,name:attachTo||'',term:term,fa:fa,ws:null,tw:tw,te:te,dotEl:tnew,state:'idle',runTimer:null}};
+  var scrollerEl=document.createElement('div');scrollerEl.className='tscroller';
+  var thumbEl=document.createElement('div');thumbEl.className='tthumb';
+  scrollerEl.appendChild(thumbEl);tw.appendChild(scrollerEl);
+
+  var obj={{id:id,name:attachTo||'',term:term,fa:fa,ws:null,tw:tw,te:te,dotEl:tnew,state:'idle',runTimer:null,scrollPos:0}};
+
+  var SCROLL_MAX=2000;
+  function updateScrollThumb(){{
+    var h=scrollerEl.clientHeight||400;
+    var thumbH=Math.max(28,Math.round(h*0.15));
+    var trackH=h-thumbH;
+    thumbEl.style.height=thumbH+'px';
+    thumbEl.style.top=Math.round(((SCROLL_MAX-obj.scrollPos)/SCROLL_MAX)*trackH)+'px';
+  }}
+  updateScrollThumb();
+  var _dragY=null,_dragStart=null;
+  thumbEl.addEventListener('mousedown',function(e){{e.preventDefault();_dragY=e.clientY;_dragStart=obj.scrollPos;}});
+  document.addEventListener('mousemove',function(e){{
+    if(_dragY===null)return;
+    var h=scrollerEl.clientHeight||400;
+    var thumbH=Math.max(28,Math.round(h*0.15));
+    var trackH=h-thumbH;if(!trackH)return;
+    var newPos=Math.max(0,Math.min(SCROLL_MAX,Math.round(_dragStart-(e.clientY-_dragY)/trackH*SCROLL_MAX)));
+    var delta=obj.scrollPos-newPos;
+    if(Math.abs(delta)>=1){{
+      var seq=new TextEncoder().encode('\x1b[<'+(delta>0?65:64)+';1;1M');
+      var n=Math.min(Math.abs(delta),40);
+      if(obj.ws&&obj.ws.readyState===1)for(var i=0;i<n;i++)obj.ws.send(seq);
+      obj.scrollPos=newPos;updateScrollThumb();
+    }}
+  }});
+  document.addEventListener('mouseup',function(){{_dragY=null;_dragStart=null;}});
+
   var ws=new WebSocket(wsUrl);
   ws.binaryType='arraybuffer';
   obj.ws=ws;
@@ -694,9 +726,12 @@ function nt(attachTo,initCmd,projectCwd){{
   new ResizeObserver(function(){{if(act===id){{fa.fit();rsz(obj.ws,term);}}}}).observe(tw);
   tw.addEventListener('wheel',function(e){{
     e.preventDefault();e.stopPropagation();
-    var seq=new TextEncoder().encode('\x1b[<'+(e.deltaY>0?65:64)+';1;1M');
+    var goUp=e.deltaY<0;
     var steps=Math.min(Math.max(1,Math.round(Math.abs(e.deltaY)/20)),8);
-    if(obj.ws&&obj.ws.readyState===1){{for(var i=0;i<steps;i++)obj.ws.send(seq);}}
+    var seq=new TextEncoder().encode('\x1b[<'+(goUp?64:65)+';1;1M');
+    if(obj.ws&&obj.ws.readyState===1)for(var i=0;i<steps;i++)obj.ws.send(seq);
+    obj.scrollPos=Math.max(0,Math.min(SCROLL_MAX,obj.scrollPos+(goUp?steps:-steps)));
+    updateScrollThumb();
   }},{{passive:false,capture:true}});
   tabs.push(obj);
   sw(id);
