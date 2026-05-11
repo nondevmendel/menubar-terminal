@@ -313,10 +313,6 @@ html,body{{height:100%;background:#0d1117;display:flex;flex-direction:column;ove
 .tw{{position:absolute;inset:0;display:none}}
 .tw.on{{display:block}}
 .xterm,.xterm-screen{{height:100%!important}}
-.xterm-viewport::-webkit-scrollbar{{display:none}}
-.tw>.xterm{{position:absolute;left:0;top:0;bottom:0;right:6px}}
-.tscroller{{position:absolute;right:0;top:0;bottom:0;width:6px;z-index:10}}
-.tthumb{{position:absolute;right:0;width:6px;background:#484f58;border-radius:3px;cursor:ns-resize}}
 
 /* ── sessions panel (right drawer) ── */
 #sp{{width:0;overflow:hidden;transition:width .2s ease;
@@ -594,8 +590,8 @@ function reconnect(obj){{
   ws.onopen=function(){{obj.fa.fit();rsz(ws,obj.term);}};
   ws.onmessage=function(e){{
     clearTimeout(obj.runTimer);
-    setTabState(obj,'running');
-    obj.runTimer=setTimeout(function(){{setTabState(obj,'idle');}},1500);
+    if(act===obj.id){{setTabState(obj,'running');obj.runTimer=setTimeout(function(){{setTabState(obj,'idle');}},1500);}}
+    else{{setTabState(obj,'attention');}}
     obj.term.write(e.data instanceof ArrayBuffer?new Uint8Array(e.data):e.data);
   }};
   ws.onclose=function(){{if(tabs.some(function(t){{return t.id===obj.id;}}))ct(obj.id,false);}};
@@ -648,38 +644,7 @@ function nt(attachTo,initCmd,projectCwd){{
   }}catch(e){{tw.style.display='';return;}}
   tw.style.display='';
 
-  var scrollerEl=document.createElement('div');scrollerEl.className='tscroller';
-  var thumbEl=document.createElement('div');thumbEl.className='tthumb';
-  scrollerEl.appendChild(thumbEl);tw.appendChild(scrollerEl);
-
-  var obj={{id:id,name:attachTo||'',term:term,fa:fa,ws:null,tw:tw,te:te,dotEl:tnew,state:'idle',runTimer:null,scrollPos:0}};
-
-  var SCROLL_MAX=2000;
-  function updateScrollThumb(){{
-    var h=scrollerEl.clientHeight||400;
-    var thumbH=Math.max(28,Math.round(h*0.15));
-    var trackH=h-thumbH;
-    thumbEl.style.height=thumbH+'px';
-    thumbEl.style.top=Math.round(((SCROLL_MAX-obj.scrollPos)/SCROLL_MAX)*trackH)+'px';
-  }}
-  updateScrollThumb();
-  var _dragY=null,_dragStart=null;
-  thumbEl.addEventListener('mousedown',function(e){{e.preventDefault();_dragY=e.clientY;_dragStart=obj.scrollPos;}});
-  document.addEventListener('mousemove',function(e){{
-    if(_dragY===null)return;
-    var h=scrollerEl.clientHeight||400;
-    var thumbH=Math.max(28,Math.round(h*0.15));
-    var trackH=h-thumbH;if(!trackH)return;
-    var newPos=Math.max(0,Math.min(SCROLL_MAX,Math.round(_dragStart-(e.clientY-_dragY)/trackH*SCROLL_MAX)));
-    var delta=obj.scrollPos-newPos;
-    if(Math.abs(delta)>=1){{
-      var seq=new TextEncoder().encode('\x1b[<'+(delta>0?65:64)+';1;1M');
-      var n=Math.min(Math.abs(delta),40);
-      if(obj.ws&&obj.ws.readyState===1)for(var i=0;i<n;i++)obj.ws.send(seq);
-      obj.scrollPos=newPos;updateScrollThumb();
-    }}
-  }});
-  document.addEventListener('mouseup',function(){{_dragY=null;_dragStart=null;}});
+  var obj={{id:id,name:attachTo||'',term:term,fa:fa,ws:null,tw:tw,te:te,dotEl:tnew,state:'idle',runTimer:null}};
 
   var ws=new WebSocket(wsUrl);
   ws.binaryType='arraybuffer';
@@ -703,10 +668,12 @@ function nt(attachTo,initCmd,projectCwd){{
         }}
       }}catch(ex){{}}
     }}
-    if(obj.scrollPos===0){{
-      clearTimeout(obj.runTimer);
+    clearTimeout(obj.runTimer);
+    if(act===id){{
       setTabState(obj,'running');
       obj.runTimer=setTimeout(function(){{setTabState(obj,'idle');}},1500);
+    }}else{{
+      setTabState(obj,'attention');
     }}
     term.write(e.data instanceof ArrayBuffer?new Uint8Array(e.data):e.data);
   }};
@@ -726,36 +693,6 @@ function nt(attachTo,initCmd,projectCwd){{
     return true;
   }});
   new ResizeObserver(function(){{if(act===id){{fa.fit();rsz(obj.ws,term);}}}}).observe(tw);
-
-  var _scrollPoll=null;
-  function syncScrollPos(){{
-    if(!obj.name)return;
-    fetch('/api/scroll-info/'+encodeURIComponent(obj.name))
-      .then(function(r){{return r.json();}})
-      .then(function(d){{
-        if(d.size>0)SCROLL_MAX=d.size;
-        obj.scrollPos=d.pos;
-        updateScrollThumb();
-        if(d.pos===0){{clearInterval(_scrollPoll);_scrollPoll=null;}}
-      }}).catch(function(){{}});
-  }}
-  function startScrollSync(){{
-    if(_scrollPoll||!obj.name)return;
-    _scrollPoll=setInterval(syncScrollPos,250);
-  }}
-
-  tw.addEventListener('wheel',function(e){{
-    e.preventDefault();e.stopPropagation();
-    var goUp=e.deltaY<0;
-    var headroom=goUp?(SCROLL_MAX-obj.scrollPos):obj.scrollPos;
-    if(headroom<=0)return;
-    var steps=Math.min(Math.max(1,Math.round(Math.abs(e.deltaY)/20)),8);
-    var seq=new TextEncoder().encode('\x1b[<'+(goUp?64:65)+';1;1M');
-    if(obj.ws&&obj.ws.readyState===1)for(var i=0;i<steps;i++)obj.ws.send(seq);
-    obj.scrollPos=Math.max(0,Math.min(SCROLL_MAX,obj.scrollPos+(goUp?steps:-steps)));
-    updateScrollThumb();
-    startScrollSync();
-  }},{{passive:false,capture:true}});
   tabs.push(obj);
   sw(id);
   if(spOpen)setTimeout(refreshSessions,800);
@@ -830,7 +767,6 @@ def _ensure_tmux_titles() -> None:
     """Enable automatic window renaming so #{window_name} stays current."""
     _tmux("set-option", "-g", "allow-rename",     "on")
     _tmux("set-option", "-g", "automatic-rename", "on")
-    _tmux("set-option", "-g", "mouse",            "on")
 
 class PTYSession:
     """One pseudo-terminal. Runs tmux if available, bare shell as fallback."""
@@ -1195,20 +1131,6 @@ class _HTMLHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/status":
             body = json.dumps({"restored": _sessions_were_restored}).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-            return
-        if self.path.startswith("/api/scroll-info/"):
-            session = urllib.parse.unquote(self.path[len("/api/scroll-info/"):])
-            try:
-                pos  = int(_tmux("display-message", "-p", "-t", session, "#{scroll_position}").strip() or "0")
-                size = int(_tmux("display-message", "-p", "-t", session, "#{history_size}").strip() or "0")
-            except ValueError:
-                pos, size = 0, 0
-            body = json.dumps({"pos": pos, "size": size}).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
