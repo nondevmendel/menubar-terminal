@@ -131,6 +131,7 @@ html,body{height:100%;background:#0d1117;display:flex;flex-direction:column;over
 </div>
 <script src="/xterm.js"></script>
 <script src="/xterm-fit.js"></script>
+<script src="/xterm-web-links.js"></script>
 <script>
 var tabs=[],act=null,n=0,spOpen=false,spTimer=null,ppOpen=false;
 
@@ -363,6 +364,12 @@ function nt(attachTo,initCmd,projectCwd){
     });
     fa=new (FitAddon.FitAddon||FitAddon)();
     term.loadAddon(fa);
+    try{
+      var wla=new (WebLinksAddon.WebLinksAddon||WebLinksAddon)(function(e,uri){
+        try{window.webkit.messageHandlers.openUrl.postMessage(uri);}catch(ex){}
+      });
+      term.loadAddon(wla);
+    }catch(ex){}
     term.open(tw);
   }catch(e){tw.style.display='';return;}
   tw.style.display='';

@@ -52,6 +52,11 @@ class _ClipboardBridge(NSObject):
                     path = str(url.path())
                     js = f"addProject({json.dumps(path)})"
                     self._wv.evaluateJavaScript_completionHandler_(js, None)
+        elif name == "openUrl":
+            url = str(msg.body() or "")
+            if url.startswith(("http://", "https://")):
+                import subprocess
+                subprocess.run(["open", url])
         elif name == "log":
             text = str(msg.body() or "")
             server._diag_log.append({"msg": text, "t": time.time()})
@@ -75,6 +80,20 @@ class _ClipboardBridge(NSObject):
 
 class TerminalWKWebView(WKWebView):
     """WKWebView subclass that intercepts ⌘C/⌘V and accepts file drops."""
+
+    def acceptsFirstMouse_(self, event):
+        return True
+
+    def mouseDown_(self, event):
+        if self.window() and not self.window().isKeyWindow():
+            self.window().makeKeyWindow()
+        objc.super(TerminalWKWebView, self).mouseDown_(event)
+
+    def mouseUp_(self, event):
+        objc.super(TerminalWKWebView, self).mouseUp_(event)
+        # Keep WebView as first responder so xterm.js selection survives mouseup
+        if self.window():
+            self.window().makeFirstResponder_(self)
 
     def performKeyEquivalent_(self, event):
         if event.modifierFlags() & NSEventModifierFlagCommand:
@@ -130,6 +149,7 @@ class TerminalViewController(NSViewController):
         ucc.addScriptMessageHandler_name_(self._bridge, "log")
         ucc.addScriptMessageHandler_name_(self._bridge, "status")
         ucc.addScriptMessageHandler_name_(self._bridge, "browse")
+        ucc.addScriptMessageHandler_name_(self._bridge, "openUrl")
 
         cfg = WKWebViewConfiguration.alloc().init()
         cfg.setUserContentController_(ucc)
@@ -193,6 +213,13 @@ class AppDelegate(NSObject):
         btn = self._item.button()
         self._popover.showRelativeToRect_ofView_preferredEdge_(
             btn.bounds(), btn, NSRectEdgeMinY)
+        # Allow popover to appear on all spaces, including full-screen spaces
+        win = self._vc.view().window()
+        if win:
+            win.setCollectionBehavior_(
+                (1 << 0) |  # NSWindowCollectionBehaviorCanJoinAllSpaces
+                (1 << 8)    # NSWindowCollectionBehaviorFullScreenAuxiliary
+            )
         NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
         wv = self._vc._wv
         if wv and wv.window():

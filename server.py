@@ -21,9 +21,10 @@ HTTP_PORT = _free_port(57331)
 # ── local asset cache ─────────────────────────────────────────────────────────
 
 _CDN = {
-    "xterm.js":     "https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js",
-    "xterm-fit.js": "https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js",
-    "xterm.css":    "https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css",
+    "xterm.js":           "https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js",
+    "xterm-fit.js":       "https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js",
+    "xterm.css":          "https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css",
+    "xterm-web-links.js": "https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js",
 }
 _assets: dict = {}
 
