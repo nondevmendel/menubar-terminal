@@ -89,12 +89,6 @@ class TerminalWKWebView(WKWebView):
             self.window().makeKeyWindow()
         objc.super(TerminalWKWebView, self).mouseDown_(event)
 
-    def mouseUp_(self, event):
-        objc.super(TerminalWKWebView, self).mouseUp_(event)
-        # Keep WebView as first responder so xterm.js selection survives mouseup
-        if self.window():
-            self.window().makeFirstResponder_(self)
-
     def performKeyEquivalent_(self, event):
         if event.modifierFlags() & NSEventModifierFlagCommand:
             key = event.charactersIgnoringModifiers() or ''
