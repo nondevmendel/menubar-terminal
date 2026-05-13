@@ -1,9 +1,8 @@
-import os, json, time, re, urllib.request, urllib.error
+import os, json, time, re
 from datetime import date
 
-_STATS_DIR   = os.path.expanduser("~/.menubar_terminal")
-_STATS_FILE  = os.path.join(_STATS_DIR, "daily_stats.json")
-_CONFIG_FILE = os.path.join(_STATS_DIR, "config.json")
+_STATS_DIR  = os.path.expanduser("~/.menubar_terminal")
+_STATS_FILE = os.path.join(_STATS_DIR, "daily_stats.json")
 
 _app_start        = time.time()
 _session_start    = None      # set when popover opens
@@ -120,91 +119,3 @@ def get() -> dict:
 
 
 _load()
-
-# ── Anthropic API key + monthly usage ─────────────────────────────────────────
-
-_usage_cache: dict = {}
-_usage_cache_time: float = 0
-_USAGE_CACHE_TTL = 1800   # refresh at most every 30 minutes
-
-
-def _load_config() -> dict:
-    try:
-        with open(_CONFIG_FILE) as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def _save_config(cfg: dict) -> None:
-    try:
-        with open(_CONFIG_FILE, "w") as f:
-            json.dump(cfg, f)
-    except Exception:
-        pass
-
-
-def set_api_key(key: str) -> None:
-    cfg = _load_config()
-    cfg["anthropic_api_key"] = key.strip()
-    _save_config(cfg)
-    global _usage_cache, _usage_cache_time
-    _usage_cache = {}
-    _usage_cache_time = 0
-
-
-def get_api_key() -> str:
-    return _load_config().get("anthropic_api_key", "")
-
-
-def fetch_monthly_usage(force: bool = False) -> dict:
-    global _usage_cache, _usage_cache_time
-    if not force and _usage_cache and time.time() - _usage_cache_time < _USAGE_CACHE_TTL:
-        return _usage_cache
-
-    key = get_api_key()
-    if not key:
-        return {"error": "no_key"}
-
-    today = date.today()
-    start = today.replace(day=1).isoformat()
-    end   = today.isoformat()
-    url   = (f"https://api.anthropic.com/v1/usage"
-             f"?start_date={start}&end_date={end}&limit=100")
-    req = urllib.request.Request(url, headers={
-        "x-api-key":           key,
-        "anthropic-version":   "2023-06-01",
-        "anthropic-beta":      "usage-2025-01-01",
-    })
-    try:
-        with urllib.request.urlopen(req, timeout=15) as r:
-            raw = json.loads(r.read())
-            result = _aggregate(raw)
-            _usage_cache = result
-            _usage_cache_time = time.time()
-            return result
-    except urllib.error.HTTPError as e:
-        body = ""
-        try: body = e.read().decode()[:200]
-        except: pass
-        return {"error": f"HTTP {e.code}", "detail": body}
-    except Exception as e:
-        return {"error": str(e)}
-
-
-def _aggregate(raw: dict) -> dict:
-    """Sum token counts across all models/days returned by the API."""
-    rows = raw.get("data") or raw.get("usage") or []
-    if not rows and isinstance(raw, list):
-        rows = raw
-    totals = {
-        "input_tokens":                 0,
-        "output_tokens":                0,
-        "cache_creation_input_tokens":  0,
-        "cache_read_input_tokens":      0,
-    }
-    for row in rows:
-        for k in totals:
-            totals[k] += row.get(k, 0)
-    totals["raw"] = raw   # keep for debugging
-    return totals
