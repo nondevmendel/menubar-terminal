@@ -93,6 +93,21 @@ html,body{height:100%;background:#0d1117;display:flex;flex-direction:column;over
   background:#21262d;color:#8b949e;font:13px -apple-system,sans-serif;cursor:pointer;flex-shrink:0}
 #pp-browse:hover,#pp-add-btn:hover{border-color:#3fb950;color:#3fb950}
 #pp-empty{padding:20px 14px;font:12px -apple-system,sans-serif;color:#484f58;text-align:center}
+/* ── usage bar ── */
+#usage-bar{display:flex;align-items:center;gap:10px;padding:0 12px;min-height:24px;
+  background:#0a0e14;border-top:1px solid #161b22;flex-shrink:0;
+  font:11px -apple-system,sans-serif;color:#484f58;white-space:nowrap}
+#usage-bar span{color:#6e7681}
+#ukey-form{display:flex;align-items:center;gap:5px}
+#ukey-input{background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;
+  font:11px -apple-system;padding:2px 6px;outline:none;width:260px}
+#ukey-input:focus{border-color:#58a6ff}
+#ukey-input::placeholder{color:#484f58}
+.ubtn{background:none;border:1px solid #30363d;border-radius:4px;color:#8b949e;
+  font:11px -apple-system;padding:1px 7px;cursor:pointer;flex-shrink:0}
+.ubtn:hover{border-color:#58a6ff;color:#58a6ff}
+#usage-tok-bar{height:3px;background:#21262d;border-radius:2px;overflow:hidden;width:120px}
+#usage-tok-fill{height:100%;width:0%;background:#58a6ff;border-radius:2px;transition:width .6s ease,background .4s}
 /* ── stats bar ── */
 #stats-bar{display:flex;align-items:center;gap:14px;padding:0 12px;height:26px;
   background:#0d1117;border-top:1px solid #21262d;flex-shrink:0;
@@ -139,6 +154,29 @@ html,body{height:100%;background:#0d1117;display:flex;flex-direction:column;over
     <div id="sp-foot">
       <button id="sp-new" onclick="newSession()">+ New Session</button>
     </div>
+  </div>
+</div>
+<div id="usage-bar">
+  <span id="u-label" style="flex-shrink:0">Anthropic API</span>
+  <span class="stat-sep" id="u-sep" style="color:#21262d">│</span>
+  <div id="u-stats" style="display:none;align-items:center;gap:10px;flex:1">
+    <span id="u-in" title="Input tokens this month"></span>
+    <span class="stat-sep" style="color:#21262d">·</span>
+    <span id="u-out" title="Output tokens this month"></span>
+    <span class="stat-sep" style="color:#21262d">·</span>
+    <span id="u-cache" title="Cache read tokens this month"></span>
+    <span class="stat-sep" style="color:#21262d">│</span>
+    <div id="usage-tok-bar" title="Monthly output usage"><div id="usage-tok-fill"></div></div>
+    <button class="ubtn" onclick="refreshUsage()" title="Refresh">↺</button>
+    <button class="ubtn" onclick="showKeyForm()" title="Change API key" style="font-size:10px">⚙</button>
+  </div>
+  <div id="u-setup" style="display:flex;align-items:center;gap:6px">
+    <div id="ukey-form" style="display:none;align-items:center;gap:5px">
+      <input id="ukey-input" type="password" placeholder="sk-ant-api03-…" onkeydown="if(event.key==='Enter')saveKey()">
+      <button class="ubtn" onclick="saveKey()">Save</button>
+      <button class="ubtn" onclick="cancelKey()">✕</button>
+    </div>
+    <button class="ubtn" id="u-add-btn" onclick="showKeyForm()">+ Add API key</button>
   </div>
 </div>
 <div id="stats-bar">
@@ -482,6 +520,62 @@ document.addEventListener('keydown',function(e){
   var k=parseInt(e.key);
   if(e.metaKey&&!isNaN(k)&&k>=1&&k<=9){var t=tabs[k-1];if(t)sw(t.id);}
 });
+
+/* ── usage bar ── */
+function showKeyForm(){
+  document.getElementById('u-add-btn').style.display='none';
+  document.getElementById('ukey-form').style.display='flex';
+  document.getElementById('ukey-input').focus();
+}
+function cancelKey(){
+  document.getElementById('ukey-form').style.display='none';
+  document.getElementById('u-add-btn').style.display='';
+}
+function saveKey(){
+  var k=document.getElementById('ukey-input').value.trim();
+  if(!k)return;
+  fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({api_key:k})})
+    .then(function(){document.getElementById('ukey-input').value='';cancelKey();refreshUsage();});
+}
+function _fmtM(n){
+  if(n>=1e6)return (n/1e6).toFixed(2)+'M';
+  if(n>=1000)return (n/1000).toFixed(1).replace(/\.0$/,'')+'k';
+  return ''+n;
+}
+function renderUsage(d){
+  if(d.error==='no_key'){
+    document.getElementById('u-stats').style.display='none';
+    document.getElementById('u-setup').style.display='flex';
+    return;
+  }
+  if(d.error){
+    document.getElementById('u-label').textContent='API error: '+d.error;
+    return;
+  }
+  document.getElementById('u-setup').style.display='none';
+  var us=document.getElementById('u-stats');
+  us.style.display='flex';
+  var mo=new Date().toLocaleString('default',{month:'short'});
+  document.getElementById('u-label').textContent=mo+' usage';
+  document.getElementById('u-in').textContent=_fmtM(d.input_tokens||0)+' in';
+  document.getElementById('u-out').textContent=_fmtM(d.output_tokens||0)+' out';
+  document.getElementById('u-cache').textContent=_fmtM(d.cache_read_input_tokens||0)+' cached';
+  // Fill bar relative to a 10M monthly output budget (adjust as needed)
+  var budget=10e6,out=d.output_tokens||0;
+  var pct=Math.min(100,out/budget*100);
+  var fill=document.getElementById('usage-tok-fill');
+  fill.style.width=pct+'%';
+  fill.style.background=pct>85?'#f85149':pct>70?'#f0883e':'#3fb950';
+}
+function refreshUsage(){
+  fetch('/api/claude-usage/refresh',{method:'POST'})
+    .then(function(r){return r.json();}).then(renderUsage).catch(function(){});
+}
+function updateUsage(){
+  fetch('/api/claude-usage').then(function(r){return r.json();}).then(renderUsage).catch(function(){});
+}
+setInterval(updateUsage,300000); // refresh every 5 min
+updateUsage();
 
 /* ── stats bar ── */
 function _fmtTime(s){

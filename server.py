@@ -155,6 +155,16 @@ class _HTMLHandler(BaseHTTPRequestHandler):
             body = json.dumps(_stats.get()).encode()
             self._send(200, "application/json", body)
             return
+        if self.path == "/api/claude-usage":
+            body = json.dumps(_stats.fetch_monthly_usage()).encode()
+            self._send(200, "application/json", body)
+            return
+        if self.path == "/api/config":
+            key = _stats.get_api_key()
+            masked = (key[:8] + "…" + key[-4:]) if len(key) > 12 else ("set" if key else "")
+            body = json.dumps({"api_key_set": bool(key), "api_key_hint": masked}).encode()
+            self._send(200, "application/json", body)
+            return
         name = self.path.lstrip("/")
         if name in _assets:
             body = _assets[name]
@@ -189,6 +199,16 @@ class _HTMLHandler(BaseHTTPRequestHandler):
         if self.path == "/api/stats/reset-tokens":
             _stats.reset_tokens()
             self._send(200, "text/plain", b"")
+            return
+        if self.path == "/api/config":
+            key = data.get("api_key", "").strip()
+            if key:
+                _stats.set_api_key(key)
+            self._send(200, "text/plain", b"")
+            return
+        if self.path == "/api/claude-usage/refresh":
+            body = json.dumps(_stats.fetch_monthly_usage(force=True)).encode()
+            self._send(200, "application/json", body)
             return
         if self.path == "/api/projects":
             path = data.get("path", "").strip()
