@@ -235,7 +235,7 @@ function renderProjects(list){
     el.appendChild(d);
   });
 }
-function openProject(path){nt(null,null,path);}
+function openProject(path){nt(null,'claude\n',path);}
 function removeProject(path){
   fetch('/api/projects',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:path})}).then(refreshProjects);
 }
@@ -321,7 +321,7 @@ function reconnect(obj){
   ws.onclose=function(){if(tabs.some(function(t){return t.id===obj.id;}))ct(obj.id,false);};
 }
 
-function ntClaude(){nt(null,'claude\\n');}
+function ntClaude(){nt(null,'claude\n');}
 function nt(attachTo,initCmd,projectCwd){
   var id=++n;
   var wsUrl=attachTo
@@ -380,7 +380,7 @@ function nt(attachTo,initCmd,projectCwd){
   ws.binaryType='arraybuffer';
   obj.ws=ws;
   var wsReady=false;
-  ws.onopen=function(){wsReady=true;fa.fit();rsz(ws,term);if(initCmd)setTimeout(function(){if(ws.readyState===1)ws.send(new TextEncoder().encode(initCmd));},400);};
+  ws.onopen=function(){wsReady=true;fa.fit();rsz(ws,term);if(initCmd)setTimeout(function(){if(ws.readyState===1)ws.send(new TextEncoder().encode(initCmd));},900);};
   ws.onmessage=function(e){
     if(!(e.data instanceof ArrayBuffer)){
       try{
