@@ -106,10 +106,16 @@ class TerminalWKWebView(WKWebView):
     def performKeyEquivalent_(self, event):
         if event.modifierFlags() & NSEventModifierFlagCommand:
             key = event.charactersIgnoringModifiers() or ''
-            if key in ('c', 'v'):
-                # JS capture-phase listener handles the actual clipboard work.
-                # Return True here only to prevent AppKit's native paste/copy
-                # from competing with our bridge.
+            if key == 'v':
+                self.evaluateJavaScript_completionHandler_(
+                    "window.webkit.messageHandlers.paste.postMessage(null);", None)
+                return True
+            if key == 'c':
+                self.evaluateJavaScript_completionHandler_(
+                    "(function(){var t=tabs&&tabs.find(function(t){return t.id===act;});"
+                    "if(t&&t.term&&t.term.hasSelection())"
+                    "{window.webkit.messageHandlers.copy.postMessage(t.term.getSelection());}})()",
+                    None)
                 return True
         return objc.super(TerminalWKWebView, self).performKeyEquivalent_(event)
 
