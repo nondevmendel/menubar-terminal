@@ -446,11 +446,9 @@ function nt(attachTo,initCmd,projectCwd){
   term.onTitleChange(function(title){if(!title)return;tlabel.textContent=title;te.title=title;});
   term.attachCustomKeyEventHandler(function(e){
     if(e.type!=='keydown')return true;
-    if(e.metaKey&&e.key==='c'){
-      if(term.hasSelection()){window.webkit.messageHandlers.copy.postMessage(term.getSelection());return false;}
-      return true;
-    }
-    if(e.metaKey&&e.key==='v'){window.webkit.messageHandlers.paste.postMessage(null);return false;}
+    // Cmd+C and Cmd+V are handled by the document-level capture listener below.
+    // Tell xterm.js not to process them so it doesn't double-handle.
+    if(e.metaKey&&(e.key==='c'||e.key==='v'))return false;
     return true;
   });
   new ResizeObserver(function(){if(act===id){fa.fit();rsz(obj.ws,term);}}).observe(tw);
@@ -492,6 +490,24 @@ window.addEventListener('focus', function() {
   var t=tabs.find(function(t){return t.id===act;});
   if(t) t.term.focus();
 });
+
+// Capture-phase handler for Cmd+C/V.  Fires before the browser's native
+// clipboard action (which would try to read/write the textarea directly and
+// fail because WKWebView's clipboardData is empty).  We route through the
+// native NSPasteboard bridge instead.
+document.addEventListener('keydown', function(e) {
+  if (!e.metaKey) return;
+  if (e.key === 'v') {
+    e.preventDefault(); e.stopPropagation();
+    try { window.webkit.messageHandlers.paste.postMessage(null); } catch(ex) {}
+  } else if (e.key === 'c') {
+    var t = tabs.find(function(t) { return t.id === act; });
+    if (t && t.term && t.term.hasSelection()) {
+      e.preventDefault(); e.stopPropagation();
+      try { window.webkit.messageHandlers.copy.postMessage(t.term.getSelection()); } catch(ex) {}
+    }
+  }
+}, true);
 
 document.addEventListener('keydown',function(e){
   if(e.metaKey&&e.key==='t'){e.preventDefault();nt();}
