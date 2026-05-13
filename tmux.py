@@ -1,4 +1,5 @@
 import os, json, subprocess, shutil, time, asyncio, pty, select, struct, fcntl, termios
+import stats as _stats
 
 TMUX = shutil.which("tmux") or "/opt/homebrew/bin/tmux"
 
@@ -65,6 +66,8 @@ def _sync_session_counter() -> None:
 def _ensure_tmux_titles() -> None:
     _tmux("set-option", "-g", "allow-rename",     "on")
     _tmux("set-option", "-g", "automatic-rename", "on")
+    # Prevent tmux from converting scroll events to arrow keys
+    _tmux("set-option", "-g", "mouse", "off")
 
 
 def _resurrect_available() -> bool:
@@ -246,6 +249,7 @@ class PTYSession:
                     None, select.select, [self.fd], [], [], 0.05)
                 if r:
                     data = os.read(self.fd, 65536)
+                    _stats.scan_output(data)
                     dead: set = set()
                     for ws in list(self.clients):
                         try:    await ws.send(data)

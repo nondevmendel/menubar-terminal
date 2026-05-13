@@ -93,6 +93,18 @@ html,body{height:100%;background:#0d1117;display:flex;flex-direction:column;over
   background:#21262d;color:#8b949e;font:13px -apple-system,sans-serif;cursor:pointer;flex-shrink:0}
 #pp-browse:hover,#pp-add-btn:hover{border-color:#3fb950;color:#3fb950}
 #pp-empty{padding:20px 14px;font:12px -apple-system,sans-serif;color:#484f58;text-align:center}
+/* ── stats bar ── */
+#stats-bar{display:flex;align-items:center;gap:14px;padding:0 12px;height:26px;
+  background:#0d1117;border-top:1px solid #21262d;flex-shrink:0;
+  font:11px -apple-system,sans-serif;color:#484f58;white-space:nowrap}
+#stats-bar span{color:#6e7681}
+.stat-sep{color:#21262d!important}
+#tok-wrap{display:flex;align-items:center;gap:6px;flex:1;min-width:0}
+#tok-label{color:#6e7681;flex-shrink:0}
+#tok-bar{flex:1;height:3px;background:#21262d;border-radius:2px;overflow:hidden;min-width:40px;max-width:160px}
+#tok-fill{height:100%;width:0%;background:#58a6ff;border-radius:2px;transition:width .6s ease,background .4s}
+#tok-reset{background:none;border:none;color:#484f58;cursor:pointer;font:11px -apple-system;padding:0 2px;line-height:1}
+#tok-reset:hover{color:#6e7681}
 </style>
 </head>
 <body>
@@ -127,6 +139,17 @@ html,body{height:100%;background:#0d1117;display:flex;flex-direction:column;over
     <div id="sp-foot">
       <button id="sp-new" onclick="newSession()">+ New Session</button>
     </div>
+  </div>
+</div>
+<div id="stats-bar">
+  <span id="s-usage" title="Time terminal was open today">-- today</span>
+  <span class="stat-sep">│</span>
+  <span id="s-uptime" title="App uptime">-- uptime</span>
+  <span class="stat-sep">│</span>
+  <div id="tok-wrap">
+    <span id="tok-label">-- ctx</span>
+    <div id="tok-bar"><div id="tok-fill"></div></div>
+    <button id="tok-reset" onclick="resetTokens()" title="Reset token counter">↺</button>
   </div>
 </div>
 <script src="/xterm.js"></script>
@@ -463,6 +486,39 @@ document.addEventListener('keydown',function(e){
   var k=parseInt(e.key);
   if(e.metaKey&&!isNaN(k)&&k>=1&&k<=9){var t=tabs[k-1];if(t)sw(t.id);}
 });
+
+/* ── stats bar ── */
+function _fmtTime(s){
+  if(s<60)return s+'s';
+  if(s<3600)return Math.floor(s/60)+'m';
+  var h=Math.floor(s/3600),m=Math.floor((s%3600)/60);
+  return h+'h'+(m?(' '+m+'m'):'');
+}
+function _fmtTok(n){
+  if(n>=1000)return (n/1000).toFixed(1).replace(/\.0$/,'')+'k';
+  return n+'';
+}
+function updateStats(){
+  fetch('/api/stats').then(function(r){return r.json();}).then(function(s){
+    document.getElementById('s-usage').textContent=_fmtTime(s.usage_secs)+' today';
+    document.getElementById('s-uptime').textContent=_fmtTime(s.uptime_secs)+' uptime';
+    if(s.token_count>0){
+      var pct=Math.min(100,s.token_count/s.token_max*100);
+      document.getElementById('tok-label').textContent=_fmtTok(s.token_count)+' / '+_fmtTok(s.token_max)+' ctx';
+      var fill=document.getElementById('tok-fill');
+      fill.style.width=pct+'%';
+      fill.style.background=pct>85?'#f85149':pct>70?'#f0883e':'#58a6ff';
+    }
+  }).catch(function(){});
+}
+function resetTokens(){
+  fetch('/api/stats/reset-tokens',{method:'POST'}).then(function(){
+    document.getElementById('tok-label').textContent='-- ctx';
+    document.getElementById('tok-fill').style.width='0%';
+  });
+}
+setInterval(updateStats,5000);
+updateStats();
 
 fetch('/api/status').then(function(r){return r.json();}).then(function(s){
   if(s.restored){toggleSessions();}else{nt();}

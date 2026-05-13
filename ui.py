@@ -16,6 +16,7 @@ from WebKit import WKWebView, WKWebViewConfiguration, WKUserContentController
 
 import server
 import tmux
+import stats as _stats
 
 NSPopoverBehaviorApplicationDefined = 0
 NSRectEdgeMinY = 1
@@ -184,6 +185,7 @@ class AppDelegate(NSObject):
             return
         if self._popover and self._popover.isShown():
             self._popover.close()
+            _stats.popover_closed()
         else:
             self._open()
 
@@ -214,6 +216,7 @@ class AppDelegate(NSObject):
                 (1 << 0) |  # NSWindowCollectionBehaviorCanJoinAllSpaces
                 (1 << 8)    # NSWindowCollectionBehaviorFullScreenAuxiliary
             )
+        _stats.popover_opened()
         NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
         wv = self._vc._wv
         if wv and wv.window():

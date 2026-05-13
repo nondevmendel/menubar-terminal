@@ -3,6 +3,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import websockets
 import tmux
+import stats as _stats
 
 _HTML_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "terminal.html")
 
@@ -150,6 +151,10 @@ class _HTMLHandler(BaseHTTPRequestHandler):
             body = json.dumps(tmux._load_projects()).encode()
             self._send(200, "application/json", body)
             return
+        if self.path == "/api/stats":
+            body = json.dumps(_stats.get()).encode()
+            self._send(200, "application/json", body)
+            return
         name = self.path.lstrip("/")
         if name in _assets:
             body = _assets[name]
@@ -181,6 +186,10 @@ class _HTMLHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         data = self._read_json_body()
+        if self.path == "/api/stats/reset-tokens":
+            _stats.reset_tokens()
+            self._send(200, "text/plain", b"")
+            return
         if self.path == "/api/projects":
             path = data.get("path", "").strip()
             if path:
