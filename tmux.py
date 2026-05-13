@@ -1,18 +1,19 @@
 import os, json, subprocess, shutil, time, asyncio, pty, select, struct, fcntl, termios
 import stats as _stats
 
-TMUX = shutil.which("tmux") or "/opt/homebrew/bin/tmux"
+_TMUX_BIN  = shutil.which("tmux") or "/opt/homebrew/bin/tmux"
 
 _CACHE_DIR = os.path.expanduser("~/.menubar_terminal")
 os.makedirs(_CACHE_DIR, exist_ok=True)
 
-_SAVED_SESSIONS_PATH  = os.path.join(_CACHE_DIR, "saved_sessions.json")
-_RESURRECT_SCRIPTS    = os.path.expanduser("~/.tmux/plugins/tmux-resurrect/scripts")
-_RESURRECT_SAVE_SH    = os.path.join(_RESURRECT_SCRIPTS, "save.sh")
-_RESURRECT_RESTORE_SH = os.path.join(_RESURRECT_SCRIPTS, "restore.sh")
-_RESURRECT_LAST       = os.path.expanduser("~/.tmux/resurrect/last")
+# Private tmux socket + config — isolates us from the user's ~/.tmux.conf
+# (avoids tmux-resurrect triggering macOS Automation dialogs on every new session)
+_TMUX_SOCKET = "menubar_terminal"
+_TMUX_CONF   = os.path.join(_CACHE_DIR, "tmux.conf")
+_TMUX_FLAGS  = ["-L", _TMUX_SOCKET, "-f", _TMUX_CONF]
 
-_PROJECTS_PATH = os.path.join(_CACHE_DIR, "projects.json")
+_SAVED_SESSIONS_PATH = os.path.join(_CACHE_DIR, "saved_sessions.json")
+_PROJECTS_PATH       = os.path.join(_CACHE_DIR, "projects.json")
 
 _sessions_were_restored: bool = False
 _tmux_session_counter: int = 0
@@ -20,7 +21,8 @@ _tmux_session_counter: int = 0
 
 def _tmux(*args) -> str:
     try:
-        r = subprocess.run([TMUX] + list(args), capture_output=True, text=True, timeout=3)
+        r = subprocess.run([_TMUX_BIN] + _TMUX_FLAGS + list(args),
+                           capture_output=True, text=True, timeout=3)
         return r.stdout.strip()
     except Exception:
         return ""
@@ -70,10 +72,6 @@ def _ensure_tmux_titles() -> None:
     _tmux("set-option", "-g", "mouse", "off")
 
 
-def _resurrect_available() -> bool:
-    return False  # disabled: resurrect save.sh uses AppleScript, triggers macOS permission dialogs
-
-
 def _get_session_cwds() -> dict:
     out = _tmux("list-panes", "-a", "-F",
                 "#{session_name}|#{pane_active}|#{window_active}|#{pane_current_path}")
@@ -102,15 +100,6 @@ def _save_sessions_simple() -> None:
 
 
 def _save_sessions() -> None:
-    if _resurrect_available() and _list_sessions():
-        try:
-            env = {**os.environ, "HOME": os.path.expanduser("~")}
-            subprocess.run(["bash", _RESURRECT_SAVE_SH],
-                           capture_output=True, timeout=15, env=env)
-            print("[menubar-terminal] tmux-resurrect: saved", flush=True)
-            return
-        except Exception as e:
-            print(f"[menubar-terminal] resurrect save error: {e}", flush=True)
     _save_sessions_simple()
 
 
@@ -139,26 +128,10 @@ def _restore_sessions_simple() -> None:
 
 def _restore_sessions() -> None:
     global _sessions_were_restored
+    _sync_claude_projects()
     if _list_sessions():
         _sync_session_counter()
         return
-    if _resurrect_available() and os.path.exists(_RESURRECT_LAST):
-        try:
-            _tmux("start-server")
-            time.sleep(0.2)
-            env = {**os.environ, "HOME": os.path.expanduser("~")}
-            subprocess.run(["bash", _RESURRECT_RESTORE_SH],
-                           capture_output=True, timeout=20, env=env)
-            time.sleep(0.6)
-            restored = _list_sessions()
-            if restored:
-                print(f"[menubar-terminal] tmux-resurrect: restored "
-                      f"{len(restored)} session(s)", flush=True)
-                _sessions_were_restored = True
-                _sync_session_counter()
-                return
-        except Exception as e:
-            print(f"[menubar-terminal] resurrect restore error: {e}", flush=True)
     before = {s["name"] for s in _list_sessions()}
     _restore_sessions_simple()
     after  = {s["name"] for s in _list_sessions()}
@@ -196,6 +169,57 @@ def _remove_project(path: str) -> None:
     _save_projects(projects)
 
 
+def _decode_claude_project_dir(dirname: str) -> str:
+    """Decode a ~/.claude/projects/ directory name to an absolute path.
+
+    Claude encodes paths by replacing '/' with '-', so directory names containing
+    hyphens are ambiguous. Resolve by testing which segment groupings exist on disk.
+    """
+    if not dirname.startswith("-"):
+        return ""
+    parts = dirname[1:].split("-")
+
+    def _resolve(parts: list, current: str) -> str:
+        if not parts:
+            return current if os.path.isdir(current) else ""
+        for n in range(1, len(parts) + 1):
+            segment = "-".join(parts[:n])
+            candidate = os.path.join(current, segment)
+            if os.path.isdir(candidate):
+                result = _resolve(parts[n:], candidate)
+                if result:
+                    return result
+        return ""
+
+    return _resolve(parts, "/")
+
+
+_CLAUDE_PROJECTS_DIR = os.path.expanduser("~/.claude/projects")
+_HOME = os.path.expanduser("~")
+
+
+def _sync_claude_projects() -> None:
+    """Auto-add any projects Claude knows about that aren't in our list yet."""
+    if not os.path.isdir(_CLAUDE_PROJECTS_DIR):
+        return
+    projects = _load_projects()
+    existing = {p["path"] for p in projects}
+    added = 0
+    for dirname in os.listdir(_CLAUDE_PROJECTS_DIR):
+        if not dirname.startswith("-"):
+            continue
+        path = _decode_claude_project_dir(dirname)
+        if not path or path == "/" or path == _HOME:
+            continue
+        if path not in existing:
+            projects.append({"path": path, "name": os.path.basename(path) or path})
+            existing.add(path)
+            added += 1
+    if added:
+        _save_projects(projects)
+        print(f"[menubar-terminal] auto-added {added} project(s) from Claude", flush=True)
+
+
 class PTYSession:
     """One pseudo-terminal backed by a tmux session (or bare shell as fallback)."""
 
@@ -205,16 +229,16 @@ class PTYSession:
         self._loop_running = False
         env = {**os.environ, "TERM": "xterm-256color", "COLORTERM": "truecolor"}
 
-        if TMUX and os.path.exists(TMUX):
+        if _TMUX_BIN and os.path.exists(_TMUX_BIN):
             if attach_to:
                 self.name = attach_to
-                cmd = [TMUX, "attach-session", "-t", attach_to]
+                cmd = [_TMUX_BIN] + _TMUX_FLAGS + ["attach-session", "-t", attach_to]
             else:
                 _tmux_session_counter += 1
                 self.name = f"tab-{_tmux_session_counter}"
                 start_dir = cwd if (cwd and os.path.isdir(cwd)) else os.path.expanduser("~")
-                cmd = [TMUX, "new-session", "-s", self.name, "-c", start_dir]
-            exe = TMUX
+                cmd = [_TMUX_BIN] + _TMUX_FLAGS + ["new-session", "-s", self.name, "-c", start_dir]
+            exe = _TMUX_BIN
         else:
             shell = os.environ.get("SHELL", "/bin/zsh")
             self.name = "shell"
@@ -226,7 +250,7 @@ class PTYSession:
             os.execve(exe, cmd, env)
         fl = fcntl.fcntl(self.fd, fcntl.F_GETFL)
         fcntl.fcntl(self.fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
-        if TMUX and os.path.exists(TMUX):
+        if _TMUX_BIN and os.path.exists(_TMUX_BIN):
             time.sleep(0.15)
             _ensure_tmux_titles()
 

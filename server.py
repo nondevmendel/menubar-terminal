@@ -148,6 +148,7 @@ class _HTMLHandler(BaseHTTPRequestHandler):
             self._send(200, "application/json", body)
             return
         if self.path == "/api/projects":
+            tmux._sync_claude_projects()
             body = json.dumps(tmux._load_projects()).encode()
             self._send(200, "application/json", body)
             return
