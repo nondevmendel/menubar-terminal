@@ -394,6 +394,9 @@ function nt(attachTo,initCmd,projectCwd){
       term.loadAddon(wla);
     }catch(ex){}
     term.open(tw);
+    // In xterm.js mouse-tracking mode the canvas consumes mousedown for pty coords
+    // and does NOT restore textarea focus.  Capture-phase handler fixes this.
+    tw.addEventListener('mousedown', function() { term.focus(); }, true);
   }catch(e){tw.style.display='';return;}
   tw.style.display='';
 
@@ -460,7 +463,7 @@ function sw(id){
     var on=t.id===id;
     t.tw.classList.toggle('on',on);
     t.te.classList.toggle('on',on);
-    if(on){t.fa.fit();t.term.focus();}
+    if(on){t.fa.fit();t.term.focus();setTimeout(function(){if(act===id)t.term.focus();},100);}
   });
 }
 
@@ -475,6 +478,11 @@ function ct(id,doKill){
   t.tw.remove();t.te.remove();tabs.splice(i,1);
   if(!tabs.length)nt();else sw(tabs[Math.max(0,i-1)].id);
 }
+
+window.addEventListener('focus', function() {
+  var t=tabs.find(function(t){return t.id===act;});
+  if(t) t.term.focus();
+});
 
 document.addEventListener('keydown',function(e){
   if(e.metaKey&&e.key==='t'){e.preventDefault();nt();}

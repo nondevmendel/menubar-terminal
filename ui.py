@@ -85,10 +85,24 @@ class TerminalWKWebView(WKWebView):
     def acceptsFirstMouse_(self, event):
         return True
 
+    def _ensureFocus(self):
+        if self.window():
+            if not self.window().isKeyWindow():
+                self.window().makeKeyWindow()
+            self.window().makeFirstResponder_(self)
+        self.evaluateJavaScript_completionHandler_(
+            "(function(){var t=tabs&&tabs.find&&tabs.find(function(t){return t.id===act;});"
+            "if(t&&t.term)t.term.focus();})()", None)
+
     def mouseDown_(self, event):
-        if self.window() and not self.window().isKeyWindow():
-            self.window().makeKeyWindow()
+        self._ensureFocus()
         objc.super(TerminalWKWebView, self).mouseDown_(event)
+
+    def otherMouseDown_(self, event):
+        # Extra mouse buttons (button 3, 4, 5 on gaming mice / side buttons)
+        # don't trigger mouseDown_ — handle focus restoration here too.
+        self._ensureFocus()
+        objc.super(TerminalWKWebView, self).otherMouseDown_(event)
 
     def performKeyEquivalent_(self, event):
         if event.modifierFlags() & NSEventModifierFlagCommand:
