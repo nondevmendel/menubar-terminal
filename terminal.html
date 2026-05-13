@@ -397,6 +397,15 @@ function nt(attachTo,initCmd,projectCwd){
     // In xterm.js mouse-tracking mode the canvas consumes mousedown for pty coords
     // and does NOT restore textarea focus.  Capture-phase handler fixes this.
     tw.addEventListener('mousedown', function() { term.focus(); }, true);
+    // Prevent scroll wheel from being converted to arrow keys in normal (shell) mode.
+    // In alternate screen (TUI apps) we let xterm.js handle it so apps get wheel events.
+    tw.addEventListener('wheel', function(e) {
+      if (term.buffer.active.type === 'normal') {
+        e.preventDefault();
+        e.stopPropagation();
+        term.scrollLines(e.deltaY > 0 ? 3 : -3);
+      }
+    }, { capture: true, passive: false });
   }catch(e){tw.style.display='';return;}
   tw.style.display='';
 
