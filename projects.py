@@ -10,8 +10,25 @@ _CACHE_DIR = os.path.expanduser("~/.menubar_terminal")
 os.makedirs(_CACHE_DIR, exist_ok=True)
 
 _PROJECTS_PATH       = os.path.join(_CACHE_DIR, "projects.json")
+_SKIP_PATH           = os.path.join(_CACHE_DIR, "projects_skip.json")
 _CLAUDE_PROJECTS_DIR = os.path.expanduser("~/.claude/projects")
 _HOME                = os.path.expanduser("~")
+
+
+def _load_skip() -> set:
+    try:
+        with open(_SKIP_PATH) as f:
+            return set(json.load(f))
+    except Exception:
+        return set()
+
+
+def _save_skip(paths) -> None:
+    try:
+        with open(_SKIP_PATH, "w") as f:
+            json.dump(sorted(paths), f)
+    except Exception as e:
+        print(f"[menubar-terminal] save-skip error: {e}", flush=True)
 
 
 def load() -> list:
@@ -39,7 +56,11 @@ def add(path: str) -> None:
 
 
 def remove(path: str) -> None:
+    """Remove from the active list AND remember it so the auto-scan won't re-add."""
     save([p for p in load() if p["path"] != path])
+    skip = _load_skip()
+    skip.add(path)
+    _save_skip(skip)
 
 
 def _decode_claude_dir(dirname: str) -> str:
@@ -115,8 +136,11 @@ def sync_git_repos() -> None:
     Scans the canonical user-project roots plus ~/ top-level (so newly-created
     repos like ~/.rickrubin show up without having to start a Claude session
     inside them first). Also prunes entries whose directory no longer exists.
+    Paths the user has explicitly Remove'd are remembered in projects_skip.json
+    and are never re-added.
     """
     projects = load()
+    skip = _load_skip()
     # Prune entries whose paths are gone (moved/deleted projects)
     kept = [p for p in projects if os.path.isdir(p.get("path", ""))]
     removed = len(projects) - len(kept)
@@ -139,7 +163,7 @@ def sync_git_repos() -> None:
             # .git can be a dir (normal) or a file (submodules / worktrees)
             if not os.path.exists(os.path.join(full, ".git")):
                 continue
-            if full in existing:
+            if full in existing or full in skip:
                 continue
             projects.append({"path": full, "name": name})
             existing.add(full)
