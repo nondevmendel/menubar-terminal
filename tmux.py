@@ -69,8 +69,8 @@ def _ensure_tmux_titles() -> None:
     _tmux("set-option", "-g", "allow-rename",     "on")
     _tmux("set-option", "-g", "automatic-rename", "on")
     _tmux("set-option", "-g", "mouse",            "off")
-    # Prevent OSC 52 from triggering macOS Automation permission dialogs
-    _tmux("set-option", "-g", "set-clipboard",    "off")
+    # external: tmux writes to system clipboard (no dialog) but ignores OSC 52 reads
+    _tmux("set-option", "-g", "set-clipboard",    "external")
 
 
 def _get_session_cwds() -> dict:

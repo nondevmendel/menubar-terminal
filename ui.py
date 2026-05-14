@@ -6,7 +6,7 @@ from Foundation import (
 )
 from AppKit import (
     NSApplication, NSStatusBar, NSPopover, NSViewController, NSView,
-    NSColor, NSMakeRect, NSPasteboard, NSPasteboardTypeString,
+    NSColor, NSMakeRect,
     NSVariableStatusItemLength, NSFont,
     NSForegroundColorAttributeName, NSFontAttributeName,
     NSFilenamesPboardType, NSDragOperationCopy, NSDragOperationNone,
