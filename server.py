@@ -136,7 +136,10 @@ class _HTMLHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/api/status":
-            body = json.dumps({"restored": session._sessions_were_restored}).encode()
+            body = json.dumps({
+                "restored": session._sessions_were_restored,
+                "sessions": [s["name"] for s in session._list_sessions()],
+            }).encode()
             self._send(200, "application/json", body)
             return
         if self.path == "/api/projects":

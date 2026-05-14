@@ -537,8 +537,14 @@ function resetTokens(){
 setInterval(updateStats,5000);
 updateStats();
 
+/* On popover open: if any live sessions exist (either freshly restored from
+   saved_sessions.json or still alive from a previous popover open), auto-attach
+   to each as a tab — so closing/reopening the popover restores your tabs.
+   Only fall back to nt() (new tab) if there are no live sessions at all. */
 fetch('/api/status').then(function(r){return r.json();}).then(function(s){
-  if(s.restored){toggleSessions();}else{nt();}
+  if(s.sessions&&s.sessions.length){
+    s.sessions.forEach(function(name){ntAttach(name);});
+  }else{nt();}
 }).catch(function(){nt();});
 setTimeout(updateMenuBarState, 1000);
 </script>
