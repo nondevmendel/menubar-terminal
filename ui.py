@@ -1,4 +1,4 @@
-import json, shlex, time
+import json, shlex
 
 import objc
 from Foundation import (
@@ -58,10 +58,6 @@ class _ClipboardBridge(NSObject):
             if url.startswith(("http://", "https://")):
                 import subprocess
                 subprocess.run(["open", url])
-        elif name == "log":
-            text = str(msg.body() or "")
-            server._diag_log.append({"msg": text, "t": time.time()})
-            print(f"[DIAG] {text}", flush=True)
         elif name == "status":
             state = str(msg.body() or "idle")
             try:
@@ -154,7 +150,6 @@ class TerminalViewController(NSViewController):
         self._bridge = _ClipboardBridge.alloc().init()
         ucc.addScriptMessageHandler_name_(self._bridge, "paste")
         ucc.addScriptMessageHandler_name_(self._bridge, "copy")
-        ucc.addScriptMessageHandler_name_(self._bridge, "log")
         ucc.addScriptMessageHandler_name_(self._bridge, "status")
         ucc.addScriptMessageHandler_name_(self._bridge, "browse")
         ucc.addScriptMessageHandler_name_(self._bridge, "openUrl")

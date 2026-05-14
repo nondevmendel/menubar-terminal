@@ -50,7 +50,6 @@ _load_assets()
 
 # ── state ─────────────────────────────────────────────────────────────────────
 
-_diag_log: list = []
 _sessions: dict = {}
 
 # ── WebSocket handlers ────────────────────────────────────────────────────────
@@ -139,10 +138,6 @@ class _HTMLHandler(BaseHTTPRequestHandler):
     _types = {".js": "text/javascript", ".css": "text/css"}
 
     def do_GET(self):
-        if self.path == "/diag":
-            body = json.dumps(_diag_log).encode()
-            self._send(200, "application/json", body)
-            return
         if self.path == "/api/status":
             body = json.dumps({"restored": tmux._sessions_were_restored}).encode()
             self._send(200, "application/json", body)
@@ -195,9 +190,6 @@ class _HTMLHandler(BaseHTTPRequestHandler):
             path = data.get("path", "").strip()
             if path:
                 tmux._add_project(path)
-        else:
-            _diag_log.append(data)
-            print(f"[DIAG] {data.get('msg', '')}", flush=True)
         self._send(200, "text/plain", b"")
 
     def do_DELETE(self):

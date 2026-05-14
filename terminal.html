@@ -169,24 +169,18 @@ function updateMenuBarState(){
     if(tabs[i].state==='attention'){s='attention';break;}
     if(tabs[i].state==='running')s='running';
   }
-  try{
-    window.webkit.messageHandlers.status.postMessage(s);
-  }catch(ex){
-    try{window.webkit.messageHandlers.log.postMessage('status-err:'+ex);}catch(e2){}
-  }
+  try{window.webkit.messageHandlers.status.postMessage(s);}catch(ex){}
 }
 
 /* ── native clipboard bridge ── */
 var _pasteAt=0;
 window._termPaste=function(text){
   var now=Date.now();
-  if(now-_pasteAt<150)return; // debounce: multiple paths may call this
+  if(now-_pasteAt<150)return;
   _pasteAt=now;
   var t=tabs.find(function(t){return t.id===act;});
-  if(t)t.term.paste(text);
+  if(t&&t.ws&&t.ws.readyState===1)t.ws.send(new TextEncoder().encode('\x1b[200~'+text+'\x1b[201~'));
 };
-// DOM paste/copy events — WKWebView fires these even when its internal
-// performKeyEquivalent_ handles Cmd+V before the JS keydown is delivered.
 document.addEventListener('paste',function(e){
   e.preventDefault();e.stopPropagation();
   try{window.webkit.messageHandlers.paste.postMessage(null);}catch(ex){}
@@ -553,9 +547,6 @@ updateStats();
 fetch('/api/status').then(function(r){return r.json();}).then(function(s){
   if(s.restored){toggleSessions();}else{nt();}
 }).catch(function(){nt();});
-setTimeout(function(){
-  try{window.webkit.messageHandlers.log.postMessage('bridge-ok');}catch(e){}
-  updateMenuBarState();
-}, 1000);
+setTimeout(updateMenuBarState, 1000);
 </script>
 </body></html>
