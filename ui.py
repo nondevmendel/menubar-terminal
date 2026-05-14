@@ -1,4 +1,4 @@
-import json, shlex
+import json, shlex, subprocess, threading
 
 import objc
 from Foundation import (
@@ -28,13 +28,34 @@ class _ClipboardBridge(NSObject):
     def setWebView_(self, wv):
         self._wv = wv
 
+    def _paste_via_tmux(self, session_name, text):
+        try:
+            r = subprocess.run(
+                [tmux._TMUX_BIN] + tmux._TMUX_FLAGS + ["load-buffer", "-b", "paste-menubar", "-"],
+                input=text.encode("utf-8"), capture_output=True, timeout=3
+            )
+            if r.returncode == 0:
+                subprocess.run(
+                    [tmux._TMUX_BIN] + tmux._TMUX_FLAGS +
+                    ["paste-buffer", "-b", "paste-menubar", "-p", "-t", session_name],
+                    capture_output=True, timeout=3
+                )
+        except Exception as e:
+            print(f"[paste] error: {e}", flush=True)
+
     def userContentController_didReceiveScriptMessage_(self, _ucc, msg):
         name = str(msg.name())
         if name == "paste":
+            session_name = str(msg.body() or "") or None
             pb = NSPasteboard.generalPasteboard()
             text = pb.stringForType_(NSPasteboardTypeString) or ""
-            js = "window._termPaste(" + json.dumps(text) + ")"
-            self._wv.evaluateJavaScript_completionHandler_(js, None)
+            if text and session_name:
+                threading.Thread(
+                    target=self._paste_via_tmux, args=(session_name, text), daemon=True
+                ).start()
+            elif text:
+                js = "window._termPaste(" + json.dumps(text) + ")"
+                self._wv.evaluateJavaScript_completionHandler_(js, None)
         elif name == "copy":
             text = str(msg.body() or "")
             pb = NSPasteboard.generalPasteboard()
@@ -104,7 +125,8 @@ class TerminalWKWebView(WKWebView):
             key = event.charactersIgnoringModifiers() or ''
             if key == 'v':
                 self.evaluateJavaScript_completionHandler_(
-                    "window.webkit.messageHandlers.paste.postMessage(null);", None)
+                    "(function(){var t=tabs&&tabs.find&&tabs.find(function(t){return t.id===act;});"
+                    "window.webkit.messageHandlers.paste.postMessage(t?t.name:null);})()", None)
                 return True
             if key == 'c':
                 self.evaluateJavaScript_completionHandler_(

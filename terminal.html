@@ -183,7 +183,8 @@ window._termPaste=function(text){
 };
 document.addEventListener('paste',function(e){
   e.preventDefault();e.stopPropagation();
-  try{window.webkit.messageHandlers.paste.postMessage(null);}catch(ex){}
+  var t=tabs.find(function(t){return t.id===act;});
+  try{window.webkit.messageHandlers.paste.postMessage(t?t.name:null);}catch(ex){}
 },true);
 document.addEventListener('copy',function(e){
   var t=tabs.find(function(t){return t.id===act;});
@@ -461,7 +462,7 @@ function nt(attachTo,initCmd,projectCwd){
       if(term.hasSelection()){try{window.webkit.messageHandlers.copy.postMessage(term.getSelection());}catch(ex){}return false;}
       return true;
     }
-    if(e.metaKey&&e.key==='v'){try{window.webkit.messageHandlers.paste.postMessage(null);}catch(ex){}return false;}
+    if(e.metaKey&&e.key==='v'){var pt=tabs.find(function(t){return t.id===act;});try{window.webkit.messageHandlers.paste.postMessage(pt?pt.name:null);}catch(ex){}return false;}
     return true;
   });
   new ResizeObserver(function(){if(act===id){fa.fit();rsz(obj.ws,term);}}).observe(tw);
