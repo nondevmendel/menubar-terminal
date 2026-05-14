@@ -68,8 +68,9 @@ def _sync_session_counter() -> None:
 def _ensure_tmux_titles() -> None:
     _tmux("set-option", "-g", "allow-rename",     "on")
     _tmux("set-option", "-g", "automatic-rename", "on")
-    # Prevent tmux from converting scroll events to arrow keys
-    _tmux("set-option", "-g", "mouse", "off")
+    _tmux("set-option", "-g", "mouse",            "off")
+    # Prevent OSC 52 from triggering macOS Automation permission dialogs
+    _tmux("set-option", "-g", "set-clipboard",    "off")
 
 
 def _get_session_cwds() -> dict:
