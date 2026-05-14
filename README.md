@@ -1,23 +1,23 @@
 # Menubar Terminal
 
-A lightweight macOS menu bar terminal app. Click **⌨** in the menu bar to open a floating, always-on-top terminal with tabs. Every tab runs inside a tmux session, so sessions survive app crashes — and now survive reboots too.
+A lightweight macOS menu bar terminal app. Click **⌨** in the menu bar to open a floating, always-on-top terminal with tabs. Every tab runs inside a [dtach](https://dtach.sourceforge.net/) session, so sessions survive app crashes and stay alive when you close the popover.
 
 ## Features
 
 - **Floating terminal** — pops up above full-screen apps
 - **Tabs** — ⌘T new, ⌘W close, ⌘1–9 switch
-- **tmux-backed** — sessions stay alive when you close the popover
-- **Sessions panel** — view, attach, or kill any tmux session (click ⊞)
+- **dtach-backed** — sessions stay alive when you close the popover. dtach is a pure passthrough (no terminal multiplexing, no clipboard interception), so paste from web "copy" buttons works correctly
+- **Sessions panel** — view, attach, or kill any session (click ⊞)
 - **Claude shortcut** — dedicated button to open a new `claude` tab
-- **Restart persistence** — sessions are saved via [tmux-resurrect](https://github.com/tmux-plugins/tmux-resurrect) and automatically restored after a reboot, including scrollback and working directories
+- **Reboot persistence** — session names + working directories are saved to `~/.menubar_terminal/saved_sessions.json` and recreated on next launch (empty shells, in the same directories)
 
 ## Setup
 
 ### Requirements
 
-- macOS (tested on Sequoia / Sonnet)
+- macOS (tested on Sequoia / Sonoma)
 - Python 3 (system `/usr/bin/python3` works)
-- [tmux](https://github.com/tmux/tmux) — `brew install tmux`
+- [dtach](https://dtach.sourceforge.net/) — `brew install dtach`
 - Python packages are auto-installed on first run (`pyobjc`, `websockets`)
 
 ### Install
@@ -27,21 +27,10 @@ A lightweight macOS menu bar terminal app. Click **⌨** in the menu bar to open
 git clone https://github.com/nondevmendel/menubar-terminal.git ~/menubar-terminal
 cd ~/menubar-terminal
 
-# 2. Install tmux-resurrect (for session persistence across reboots)
-mkdir -p ~/.tmux/plugins
-git clone --depth=1 https://github.com/tmux-plugins/tmux-resurrect \
-    ~/.tmux/plugins/tmux-resurrect
+# 2. Install dtach
+brew install dtach
 
-# 3. Copy the tmux config (enables scrollback saving)
-cp ~/.tmux.conf ~/.tmux.conf.bak 2>/dev/null; true
-cat >> ~/.tmux.conf <<'EOF'
-run-shell ~/.tmux/plugins/tmux-resurrect/resurrect.tmux
-set -g @resurrect-capture-pane-contents 'on'
-set -g @resurrect-pane-contents-area 'full'
-set -g @resurrect-processes 'ssh python3 node vim nvim'
-EOF
-
-# 4. Register the LaunchAgent so it starts at login
+# 3. Register the LaunchAgent so it starts at login
 #    Edit the plist first — replace YOUR_USERNAME with your actual username:
 sed -i '' "s/YOUR_USERNAME/$(whoami)/g" com.user.menubar-terminal.plist
 cp com.user.menubar-terminal.plist ~/Library/LaunchAgents/
@@ -58,12 +47,21 @@ python3 ~/menubar-terminal/menubar_terminal.py &
 
 | Event | What happens |
 |---|---|
-| App crash / kill | tmux server stays up; sessions reattach normally |
-| Every 5 minutes | `tmux-resurrect` saves session layout + scrollback to `~/.tmux/resurrect/last` |
+| Popover closed | dtach master keeps the shell running; reattach restores live state |
+| App crash / kill | dtach masters survive in the background; reattach normally on next launch |
+| Every 5 minutes | Session names + cwds saved to `~/.menubar_terminal/saved_sessions.json` |
 | After a session kill | Immediate save |
-| System reboot | On next launch, resurrect restores all sessions in their last directories; sessions panel opens automatically so you can reattach |
+| System reboot | dtach masters die with the kernel; on next launch the app recreates each saved session as a fresh shell in its saved cwd |
 
-Session data is stored in `~/.tmux/resurrect/`. The simple JSON fallback (`~/.menubar_terminal/saved_sessions.json`) is used if tmux-resurrect is not installed.
+Session sockets live in `~/.menubar_terminal/sockets/`. Each session also has a `.pid` sidecar pointing at its dtach master, so the app can find and clean up sessions after a server restart.
+
+## Why dtach, not tmux
+
+Previous versions used tmux as the persistence layer. dtach replaces it because:
+
+- **Clipboard works.** dtach is a pure byte-passthrough — paste from a "copy" button on a webpage lands in the shell exactly as-is. tmux's paste-buffer detour was corrupting certain inputs.
+- **Native scrollback.** xterm.js handles its own scrollback; wheel/trackpad scroll Just Works without escape-sequence translation.
+- **Same persistence story.** Sessions survive popover-close, app-restart, and crashes. (Neither tmux nor dtach survives a reboot with running state — both recreate empty shells.)
 
 ## Keyboard shortcuts
 

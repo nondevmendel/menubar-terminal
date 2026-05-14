@@ -40,7 +40,7 @@ except: _pip("websockets"); import websockets
 # ── deferred imports (packages guaranteed installed above) ────────────────────
 from server import _run_ws_server
 from ui import AppDelegate
-import tmux
+import session
 
 from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
 
@@ -49,7 +49,7 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 
     def _on_sigterm(_sig, _frame):
-        tmux._save_sessions()
+        session._save_sessions()
         sys.exit(0)
     signal.signal(signal.SIGTERM, _on_sigterm)
 

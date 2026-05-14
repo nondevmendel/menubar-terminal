@@ -172,7 +172,7 @@ function updateMenuBarState(){
   try{window.webkit.messageHandlers.status.postMessage(s);}catch(ex){}
 }
 
-/* ── native clipboard bridge ── */
+/* ── paste: bracketed-paste sequence sent straight to the PTY via WebSocket ── */
 var _pasteAt=0;
 window._termPaste=function(text){
   var now=Date.now();
@@ -182,10 +182,10 @@ window._termPaste=function(text){
   if(t&&t.ws&&t.ws.readyState===1)t.ws.send(new TextEncoder().encode('\x1b[200~'+text+'\x1b[201~'));
 };
 document.addEventListener('paste',function(e){
-  e.preventDefault();e.stopPropagation();
   var text=(e.clipboardData||window.clipboardData).getData('text/plain');
-  var t=tabs.find(function(t){return t.id===act;});
-  try{window.webkit.messageHandlers.paste.postMessage(JSON.stringify({name:t?t.name:'',text:text}));}catch(ex){}
+  if(!text)return;
+  e.preventDefault();e.stopPropagation();
+  window._termPaste(text);
 },true);
 document.addEventListener('copy',function(e){
   var t=tabs.find(function(t){return t.id===act;});
@@ -410,7 +410,6 @@ function nt(attachTo,initCmd,projectCwd){
     // In xterm.js mouse-tracking mode the canvas consumes mousedown for pty coords
     // and does NOT restore textarea focus.  Capture-phase handler fixes this.
     tw.addEventListener('mousedown', function() { term.focus(); }, true);
-    tw.addEventListener('wheel', function(e) { e.preventDefault(); }, { capture: true, passive: false });
   }catch(e){tw.style.display='';return;}
   tw.style.display='';
 

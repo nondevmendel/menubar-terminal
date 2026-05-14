@@ -2,7 +2,8 @@ import asyncio, json, os, socket, threading, urllib.parse, urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import websockets
-import tmux
+import session
+import projects
 import stats as _stats
 
 _HTML_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "terminal.html")
@@ -31,7 +32,7 @@ _assets: dict = {}
 
 def _load_assets() -> None:
     for name, url in _CDN.items():
-        path = os.path.join(tmux._CACHE_DIR, name)
+        path = os.path.join(session._CACHE_DIR, name)
         if os.path.exists(path):
             with open(path, "rb") as f:
                 _assets[name] = f.read()
@@ -69,35 +70,35 @@ async def pty_handler(ws, *_) -> None:
 
     if path.startswith("attach/"):
         attach_to = path[len("attach/"):]
-        session = tmux.PTYSession(attach_to=attach_to)
-        key = f"attach-{id(session)}"
-        _sessions[key] = session
+        s = session.PTYSession(attach_to=attach_to)
+        key = f"attach-{id(s)}"
+        _sessions[key] = s
     else:
         key = str(len(_sessions) + 1)
-        _sessions[key] = tmux.PTYSession(cwd=cwd)
+        _sessions[key] = session.PTYSession(cwd=cwd)
 
-    session = _sessions[key]
-    session.clients.add(ws)
-    session.start_loop()
-    await ws.send(json.dumps({"type": "init", "name": session.name}))
+    s = _sessions[key]
+    s.clients.add(ws)
+    s.start_loop()
+    await ws.send(json.dumps({"type": "init", "name": s.name}))
 
-    watcher = asyncio.ensure_future(tmux._title_watcher(ws, session.name))
+    watcher = asyncio.ensure_future(session._title_watcher(ws, s.name))
     try:
         async for msg in ws:
             if isinstance(msg, bytes):
-                session.write(msg)
+                s.write(msg)
             else:
                 try:
                     cmd = json.loads(msg)
                     if cmd.get("type") == "resize":
-                        session.resize(int(cmd["rows"]), int(cmd["cols"]))
+                        s.resize(int(cmd["rows"]), int(cmd["cols"]))
                 except Exception:
-                    session.write(msg.encode() if isinstance(msg, str) else msg)
+                    s.write(msg.encode() if isinstance(msg, str) else msg)
     except Exception:
         pass
     finally:
         watcher.cancel()
-        session.clients.discard(ws)
+        s.clients.discard(ws)
 
 
 async def control_handler(ws, *_) -> None:
@@ -107,18 +108,14 @@ async def control_handler(ws, *_) -> None:
                 cmd = json.loads(msg)
                 action = cmd.get("action")
                 if action == "list":
-                    sessions = await asyncio.get_running_loop().run_in_executor(
-                        None, tmux._list_sessions)
-                    await ws.send(json.dumps({"type": "sessions", "data": sessions}))
+                    sessions_list = await asyncio.get_running_loop().run_in_executor(
+                        None, session._list_sessions)
+                    await ws.send(json.dumps({"type": "sessions", "data": sessions_list}))
                 elif action == "kill":
                     name = cmd.get("name", "")
                     await asyncio.get_running_loop().run_in_executor(
-                        None, lambda: tmux._tmux("kill-session", "-t", name))
-                    await asyncio.get_running_loop().run_in_executor(None, tmux._save_sessions)
-                elif action == "detach":
-                    name = cmd.get("name", "")
-                    await asyncio.get_running_loop().run_in_executor(
-                        None, lambda: tmux._tmux("detach-client", "-s", name))
+                        None, lambda: session._kill_session(name))
+                    await asyncio.get_running_loop().run_in_executor(None, session._save_sessions)
             except Exception:
                 pass
     except Exception:
@@ -139,12 +136,12 @@ class _HTMLHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/api/status":
-            body = json.dumps({"restored": tmux._sessions_were_restored}).encode()
+            body = json.dumps({"restored": session._sessions_were_restored}).encode()
             self._send(200, "application/json", body)
             return
         if self.path == "/api/projects":
-            tmux._sync_claude_projects()
-            body = json.dumps(tmux._load_projects()).encode()
+            projects.sync_claude_projects()
+            body = json.dumps(projects.load()).encode()
             self._send(200, "application/json", body)
             return
         if self.path == "/api/stats":
@@ -189,7 +186,7 @@ class _HTMLHandler(BaseHTTPRequestHandler):
         if self.path == "/api/projects":
             path = data.get("path", "").strip()
             if path:
-                tmux._add_project(path)
+                projects.add(path)
         self._send(200, "text/plain", b"")
 
     def do_DELETE(self):
@@ -197,7 +194,7 @@ class _HTMLHandler(BaseHTTPRequestHandler):
         if self.path == "/api/projects":
             path = data.get("path", "").strip()
             if path:
-                tmux._remove_project(path)
+                projects.remove(path)
         self._send(200, "text/plain", b"")
 
     def log_message(self, *_): pass
@@ -208,10 +205,10 @@ def _run_ws_server() -> None:
     async def _periodic_save():
         while True:
             await asyncio.sleep(300)
-            await asyncio.get_running_loop().run_in_executor(None, tmux._save_sessions)
+            await asyncio.get_running_loop().run_in_executor(None, session._save_sessions)
 
     async def _main():
-        tmux._restore_sessions()
+        session._restore_sessions()
         http = HTTPServer(("127.0.0.1", HTTP_PORT), _HTMLHandler)
         threading.Thread(target=http.serve_forever, daemon=True).start()
         async with websockets.serve(ws_router, "127.0.0.1", WS_PORT):
