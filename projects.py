@@ -87,3 +87,66 @@ def sync_claude_projects() -> None:
     if added:
         save(projects)
         print(f"[menubar-terminal] auto-added {added} project(s) from Claude", flush=True)
+
+
+# Locations scanned for git repos. ~/ is included so home-root projects
+# like ~/.rickrubin or ~/menubar-terminal are picked up; standard macOS
+# system folders inside ~ are skipped to avoid noise.
+_GIT_SCAN_ROOTS = [
+    os.path.expanduser("~/Desktop/claude"),
+    os.path.expanduser("~/Documents"),
+    os.path.expanduser("~/Sites"),
+    _HOME,
+]
+_HOME_SKIP = {
+    "Desktop", "Documents", "Sites", "Library", "Music", "Movies",
+    "Pictures", "Public", "Downloads", "Applications",
+    # very common dotfile-tool dirs that aren't user projects
+    ".Trash", ".cache", ".config", ".cargo", ".rustup", ".npm",
+    ".local", ".oh-my-zsh", ".vscode", ".cursor", ".docker",
+    ".gradle", ".m2", ".gem", ".bundle", ".pyenv", ".nvm",
+    ".rbenv", ".tmux", ".vim", ".ssh", ".gnupg", ".aws",
+}
+
+
+def sync_git_repos() -> None:
+    """Auto-add any directory containing .git that we haven't seen yet.
+
+    Scans the canonical user-project roots plus ~/ top-level (so newly-created
+    repos like ~/.rickrubin show up without having to start a Claude session
+    inside them first). Also prunes entries whose directory no longer exists.
+    """
+    projects = load()
+    # Prune entries whose paths are gone (moved/deleted projects)
+    kept = [p for p in projects if os.path.isdir(p.get("path", ""))]
+    removed = len(projects) - len(kept)
+    projects = kept
+    existing = {p["path"] for p in projects}
+    added = 0
+    for root in _GIT_SCAN_ROOTS:
+        if not os.path.isdir(root):
+            continue
+        try:
+            names = os.listdir(root)
+        except OSError:
+            continue
+        for name in names:
+            if root == _HOME and name in _HOME_SKIP:
+                continue
+            full = os.path.join(root, name)
+            if not os.path.isdir(full):
+                continue
+            # .git can be a dir (normal) or a file (submodules / worktrees)
+            if not os.path.exists(os.path.join(full, ".git")):
+                continue
+            if full in existing:
+                continue
+            projects.append({"path": full, "name": name})
+            existing.add(full)
+            added += 1
+    if added or removed:
+        save(projects)
+        msg = []
+        if added:   msg.append(f"added {added} git repo(s)")
+        if removed: msg.append(f"pruned {removed} stale entry(ies)")
+        print(f"[menubar-terminal] projects: {', '.join(msg)}", flush=True)

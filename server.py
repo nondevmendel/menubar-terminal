@@ -141,6 +141,7 @@ class _HTMLHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/projects":
             projects.sync_claude_projects()
+            projects.sync_git_repos()
             body = json.dumps(projects.load()).encode()
             self._send(200, "application/json", body)
             return
