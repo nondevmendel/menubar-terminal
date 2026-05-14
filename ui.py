@@ -69,9 +69,12 @@ class _ClipboardBridge(NSObject):
                 self._wv.evaluateJavaScript_completionHandler_(js, None)
         elif name == "copy":
             text = str(msg.body() or "")
-            pb = NSPasteboard.generalPasteboard()
-            pb.prepareForNewContentsWithOptions_(0)
-            pb.setString_forType_(text, NSPasteboardTypeString)
+            if text:
+                try:
+                    subprocess.run(["pbcopy"], input=text.encode("utf-8"),
+                                   capture_output=True, timeout=3)
+                except Exception as e:
+                    print(f"[copy] error: {e}", flush=True)
         elif name == "browse":
             from AppKit import NSOpenPanel
             panel = NSOpenPanel.openPanel()
@@ -150,6 +153,8 @@ class TerminalWKWebView(WKWebView):
             "})()"
         )
         self.evaluateJavaScript_completionHandler_(js, None)
+        if self.window():
+            self.window().makeFirstResponder_(self)
 
     def _jsFocus(self):
         self.evaluateJavaScript_completionHandler_(
