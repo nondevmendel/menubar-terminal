@@ -81,12 +81,14 @@ class _ClipboardBridge(NSObject):
 
 
 class TerminalWKWebView(WKWebView):
-    """WKWebView subclass that intercepts ⌘C and accepts file drops.
+    """WKWebView subclass that drives ⌘V and ⌘C from native code.
 
-    ⌘V is left to WKWebView's native paste handling, which fires a DOM `paste`
-    event with `e.clipboardData` populated under user-gesture permission — the
-    JS handler in the page picks it up and forwards bracketed-paste bytes to
-    the PTY via WebSocket.
+    We don't trust WKWebView's native paste action to find the right target
+    inside xterm.js (the textarea is a hidden overlay and focus can be flaky).
+    Instead, on ⌘V we read NSPasteboard via pbpaste and inject the text into
+    the page via `window._termPaste`, which sends bracketed-paste bytes via
+    WebSocket. The DOM `paste` handler is kept as a secondary path for drag-
+    drop and any case where this native path doesn't fire.
     """
 
     def acceptsFirstMouse_(self, event):
@@ -110,19 +112,33 @@ class TerminalWKWebView(WKWebView):
         objc.super(TerminalWKWebView, self).otherMouseDown_(event)
         self._jsFocus()
 
+    def _do_paste(self):
+        """Read pbpaste and inject into the active tab via window._termPaste."""
+        try:
+            r = subprocess.run(["pbpaste"], capture_output=True, timeout=2)
+            text = r.stdout.decode("utf-8", errors="replace")
+            if text:
+                js = "if(window._termPaste)window._termPaste(" + json.dumps(text) + ")"
+                self.evaluateJavaScript_completionHandler_(js, None)
+        except Exception as e:
+            print(f"[paste] error: {e}", flush=True)
+
+    def _do_copy(self):
+        """Ask JS for the current xterm selection; it postMessages it back to pbcopy."""
+        self.evaluateJavaScript_completionHandler_(
+            "(function(){var t=tabs&&tabs.find(function(t){return t.id===act;});"
+            "if(t&&t.term&&t.term.hasSelection())"
+            "{window.webkit.messageHandlers.copy.postMessage(t.term.getSelection());}})()",
+            None)
+
     def performKeyEquivalent_(self, event):
         if event.modifierFlags() & NSEventModifierFlagCommand:
             key = event.charactersIgnoringModifiers() or ''
             if key == 'v':
-                # Let WKWebView do the native paste — fires DOM paste event
-                # with clipboardData; our JS listener forwards to the PTY.
-                return objc.super(TerminalWKWebView, self).performKeyEquivalent_(event)
+                self._do_paste()
+                return True
             if key == 'c':
-                self.evaluateJavaScript_completionHandler_(
-                    "(function(){var t=tabs&&tabs.find(function(t){return t.id===act;});"
-                    "if(t&&t.term&&t.term.hasSelection())"
-                    "{window.webkit.messageHandlers.copy.postMessage(t.term.getSelection());}})()",
-                    None)
+                self._do_copy()
                 return True
         return objc.super(TerminalWKWebView, self).performKeyEquivalent_(event)
 
