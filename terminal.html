@@ -416,19 +416,6 @@ function nt(attachTo,initCmd,projectCwd){
 
   var obj={id:id,name:attachTo||'',term:term,fa:fa,ws:null,tw:tw,te:te,dotEl:tnew,state:'idle',runTimer:null};
 
-  var _scrollDelta=0,_scrollTimer=null;
-  tw.addEventListener('wheel',function(e){
-    e.preventDefault();e.stopPropagation();
-    _scrollDelta+=e.deltaY;
-    clearTimeout(_scrollTimer);
-    _scrollTimer=setTimeout(function(){
-      var lines=Math.max(1,Math.round(Math.abs(_scrollDelta)/40));
-      var dir=_scrollDelta>0?'down':'up';
-      _scrollDelta=0;
-      if(obj.name){try{window.webkit.messageHandlers.scroll.postMessage(JSON.stringify({name:obj.name,dir:dir,lines:lines}));}catch(ex){}}
-    },50);
-  },{capture:true,passive:false});
-
   var ws=new WebSocket(wsUrl);
   ws.binaryType='arraybuffer';
   obj.ws=ws;

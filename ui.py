@@ -70,7 +70,7 @@ class _ClipboardBridge(NSObject):
         elif name == "copy":
             text = str(msg.body() or "")
             pb = NSPasteboard.generalPasteboard()
-            pb.clearContents()
+            pb.prepareForNewContentsWithOptions_(0)
             pb.setString_forType_(text, NSPasteboardTypeString)
         elif name == "browse":
             from AppKit import NSOpenPanel
@@ -124,6 +124,32 @@ class TerminalWKWebView(WKWebView):
 
     def acceptsFirstMouse_(self, event):
         return True
+
+    def scrollWheel_(self, event):
+        # Skip trackpad momentum (inertia after finger lift)
+        if event.momentumPhase() != 0:
+            return
+        dy = event.scrollingDeltaY()
+        if abs(dy) < 0.5:
+            return
+        direction = 'up' if dy > 0 else 'down'
+        if event.hasPreciseScrollingDeltas():
+            lines = max(1, int(abs(dy) / 20))
+        else:
+            lines = max(1, int(abs(dy)))
+        js = (
+            "(function(){"
+            "var t=tabs&&tabs.find(function(t){return t.id===act;});"
+            "if(t&&t.name){"
+            "try{"
+            "window.webkit.messageHandlers.scroll.postMessage("
+            "JSON.stringify({name:t.name,dir:'" + direction + "',lines:" + str(lines) + "})"
+            ");"
+            "}catch(ex){}"
+            "}"
+            "})()"
+        )
+        self.evaluateJavaScript_completionHandler_(js, None)
 
     def _jsFocus(self):
         self.evaluateJavaScript_completionHandler_(
