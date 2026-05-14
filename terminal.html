@@ -183,8 +183,9 @@ window._termPaste=function(text){
 };
 document.addEventListener('paste',function(e){
   e.preventDefault();e.stopPropagation();
+  var text=(e.clipboardData||window.clipboardData).getData('text/plain');
   var t=tabs.find(function(t){return t.id===act;});
-  try{window.webkit.messageHandlers.paste.postMessage(t?t.name:null);}catch(ex){}
+  try{window.webkit.messageHandlers.paste.postMessage(JSON.stringify({name:t?t.name:'',text:text}));}catch(ex){}
 },true);
 document.addEventListener('copy',function(e){
   var t=tabs.find(function(t){return t.id===act;});
@@ -409,19 +410,24 @@ function nt(attachTo,initCmd,projectCwd){
     // In xterm.js mouse-tracking mode the canvas consumes mousedown for pty coords
     // and does NOT restore textarea focus.  Capture-phase handler fixes this.
     tw.addEventListener('mousedown', function() { term.focus(); }, true);
-    // Prevent scroll wheel from being converted to arrow keys in normal (shell) mode.
-    // In alternate screen (TUI apps) we let xterm.js handle it so apps get wheel events.
-    tw.addEventListener('wheel', function(e) {
-      if (term.buffer.active.type === 'normal') {
-        e.preventDefault();
-        e.stopPropagation();
-        term.scrollLines(e.deltaY > 0 ? 3 : -3);
-      }
-    }, { capture: true, passive: false });
+    tw.addEventListener('wheel', function(e) { e.preventDefault(); }, { capture: true, passive: false });
   }catch(e){tw.style.display='';return;}
   tw.style.display='';
 
   var obj={id:id,name:attachTo||'',term:term,fa:fa,ws:null,tw:tw,te:te,dotEl:tnew,state:'idle',runTimer:null};
+
+  var _scrollDelta=0,_scrollTimer=null;
+  tw.addEventListener('wheel',function(e){
+    e.preventDefault();e.stopPropagation();
+    _scrollDelta+=e.deltaY;
+    clearTimeout(_scrollTimer);
+    _scrollTimer=setTimeout(function(){
+      var lines=Math.max(1,Math.round(Math.abs(_scrollDelta)/40));
+      var dir=_scrollDelta>0?'down':'up';
+      _scrollDelta=0;
+      if(obj.name){try{window.webkit.messageHandlers.scroll.postMessage(JSON.stringify({name:obj.name,dir:dir,lines:lines}));}catch(ex){}}
+    },50);
+  },{capture:true,passive:false});
 
   var ws=new WebSocket(wsUrl);
   ws.binaryType='arraybuffer';
@@ -462,7 +468,7 @@ function nt(attachTo,initCmd,projectCwd){
       if(term.hasSelection()){try{window.webkit.messageHandlers.copy.postMessage(term.getSelection());}catch(ex){}return false;}
       return true;
     }
-    if(e.metaKey&&e.key==='v'){var pt=tabs.find(function(t){return t.id===act;});try{window.webkit.messageHandlers.paste.postMessage(pt?pt.name:null);}catch(ex){}return false;}
+    if(e.metaKey&&e.key==='v'){return false;}
     return true;
   });
   new ResizeObserver(function(){if(act===id){fa.fit();rsz(obj.ws,term);}}).observe(tw);

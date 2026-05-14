@@ -43,12 +43,23 @@ class _ClipboardBridge(NSObject):
         except Exception as e:
             print(f"[paste] error: {e}", flush=True)
 
+    def _tmux_scroll(self, session_name, direction, lines):
+        try:
+            tmux._tmux("copy-mode", "-t", session_name)
+            key = "scroll-up" if direction == "up" else "scroll-down"
+            tmux._tmux("send-keys", "-t", session_name, "-X", "-N", str(lines), key)
+        except Exception as e:
+            print(f"[scroll] error: {e}", flush=True)
+
     def userContentController_didReceiveScriptMessage_(self, _ucc, msg):
         name = str(msg.name())
         if name == "paste":
-            session_name = str(msg.body() or "") or None
-            pb = NSPasteboard.generalPasteboard()
-            text = pb.stringForType_(NSPasteboardTypeString) or ""
+            try:
+                data = json.loads(str(msg.body() or ""))
+                session_name = data.get("name", "")
+                text = data.get("text", "")
+            except Exception:
+                return
             if text and session_name:
                 threading.Thread(
                     target=self._paste_via_tmux, args=(session_name, text), daemon=True
@@ -74,6 +85,18 @@ class _ClipboardBridge(NSObject):
                     path = str(url.path())
                     js = f"addProject({json.dumps(path)})"
                     self._wv.evaluateJavaScript_completionHandler_(js, None)
+        elif name == "scroll":
+            try:
+                data = json.loads(str(msg.body() or ""))
+                session_name = data.get("name", "")
+                direction = data.get("dir", "up")
+                lines = max(1, int(data.get("lines", 3)))
+            except Exception:
+                return
+            if session_name:
+                threading.Thread(
+                    target=self._tmux_scroll, args=(session_name, direction, lines), daemon=True
+                ).start()
         elif name == "openUrl":
             url = str(msg.body() or "")
             if url.startswith(("http://", "https://")):
@@ -124,10 +147,11 @@ class TerminalWKWebView(WKWebView):
         if event.modifierFlags() & NSEventModifierFlagCommand:
             key = event.charactersIgnoringModifiers() or ''
             if key == 'v':
-                self.evaluateJavaScript_completionHandler_(
-                    "(function(){var t=tabs&&tabs.find&&tabs.find(function(t){return t.id===act;});"
-                    "window.webkit.messageHandlers.paste.postMessage(t?t.name:null);})()", None)
-                return True
+                # Let WKWebView handle paste natively — it reads clipboard with
+                # user-gesture permission (no Automation dialog). The DOM paste
+                # event fires with e.clipboardData; our JS listener intercepts it
+                # and routes to Python without any NSPasteboard read.
+                return objc.super(TerminalWKWebView, self).performKeyEquivalent_(event)
             if key == 'c':
                 self.evaluateJavaScript_completionHandler_(
                     "(function(){var t=tabs&&tabs.find(function(t){return t.id===act;});"
@@ -175,6 +199,7 @@ class TerminalViewController(NSViewController):
         ucc.addScriptMessageHandler_name_(self._bridge, "status")
         ucc.addScriptMessageHandler_name_(self._bridge, "browse")
         ucc.addScriptMessageHandler_name_(self._bridge, "openUrl")
+        ucc.addScriptMessageHandler_name_(self._bridge, "scroll")
 
         cfg = WKWebViewConfiguration.alloc().init()
         cfg.setUserContentController_(ucc)
