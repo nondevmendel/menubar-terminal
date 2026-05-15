@@ -19,7 +19,13 @@ import os, json, subprocess, shutil, time, asyncio, pty, select, struct, fcntl, 
 import socket as _socket
 import stats as _stats
 
-_DTACH_BIN = shutil.which("dtach") or "/opt/homebrew/bin/dtach"
+# Use the wrapper .app's dtach so macOS attributes TCC permission prompts
+# (e.g. App Management when a child shell runs osascript) to a stable .app
+# identity that the user can pin in System Settings → Privacy & Security →
+# App Management via the + button. Raw /opt/homebrew/bin/dtach cannot be
+# pinned there because the picker only accepts .app bundles.
+_WRAPPER_DTACH = "/Applications/Claude Applications/menubar-terminal/DtachLauncher.app/Contents/MacOS/dtach"
+_DTACH_BIN = _WRAPPER_DTACH if os.path.exists(_WRAPPER_DTACH) else (shutil.which("dtach") or "/opt/homebrew/bin/dtach")
 
 _CACHE_DIR = os.path.expanduser("~/.menubar_terminal")
 _SOCK_DIR  = os.path.join(_CACHE_DIR, "sockets")
