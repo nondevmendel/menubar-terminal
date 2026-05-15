@@ -10,7 +10,7 @@
   <array>
     <string>/usr/bin/python3</string>
     <string>-u</string>
-    <string>/Users/mendelrosenberg/menubar-terminal/menubar_terminal.py</string>
+    <string>/Users/mendelrosenberg/Desktop/Claude/Current/menubar-terminal/menubar_terminal.py</string>
   </array>
 
   <key>RunAtLoad</key>
