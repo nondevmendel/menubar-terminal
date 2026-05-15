@@ -22,10 +22,14 @@ A lightweight macOS menu bar terminal app. Click **⌨** in the menu bar to open
 
 ### Install
 
+> **Important:** the project MUST live at `/Applications/Claude Applications/menubar-terminal/`. The LaunchAgent plist (`com.user.menubar-terminal.plist`), `session.py`'s reference to `DtachLauncher.app`, and `CLAUDE.md` all hardcode this path. Cloning to `~/Desktop/...` or anywhere else will break the LaunchAgent and re-trigger the macOS TCC permission prompts that the App Management whitelist is meant to suppress (launchd-spawned `python3` is blocked from `~/Desktop/` by Files & Folders permissions on modern macOS).
+
 ```bash
-# 1. Clone
-git clone https://github.com/nondevmendel/menubar-terminal.git ~/Desktop/Claude/Current/menubar-terminal
-cd ~/Desktop/Claude/Current/menubar-terminal
+# 1. Clone — path matters (see note above)
+sudo mkdir -p "/Applications/Claude Applications"
+sudo chown "$(whoami)" "/Applications/Claude Applications"
+git clone https://github.com/nondevmendel/menubar-terminal.git "/Applications/Claude Applications/menubar-terminal"
+cd "/Applications/Claude Applications/menubar-terminal"
 
 # 2. Install dtach
 brew install dtach
@@ -37,10 +41,26 @@ cp com.user.menubar-terminal.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.user.menubar-terminal.plist
 ```
 
+### Whitelist DtachLauncher.app (one-time)
+
+Inside dtach-attached shells, any process that uses AppleScript (`osascript`) trips macOS's *App Management* permission. The TCC system attributes the prompt to dtach (its responsible-process ancestor). To dismiss it permanently:
+
+1. Open **System Settings → Privacy & Security → App Management**.
+2. Click **+**, navigate to `/Applications/Claude Applications/menubar-terminal/DtachLauncher.app`, and add it.
+3. Toggle it **on**.
+
+`DtachLauncher.app` is a thin wrapper bundle (ad-hoc signed, `com.user.menubar-terminal.dtach`) around a copy of the real dtach binary. System Settings's `+` button refuses raw CLI binaries, which is why the wrapper exists. If you ever upgrade dtach via Homebrew, refresh the copy:
+
+```bash
+cp /opt/homebrew/bin/dtach "/Applications/Claude Applications/menubar-terminal/DtachLauncher.app/Contents/MacOS/dtach"
+codesign --force --deep --sign - --identifier com.user.menubar-terminal.dtach \
+  "/Applications/Claude Applications/menubar-terminal/DtachLauncher.app"
+```
+
 ### Run manually (without LaunchAgent)
 
 ```bash
-python3 ~/Desktop/Claude/Current/menubar-terminal/menubar_terminal.py &
+python3 "/Applications/Claude Applications/menubar-terminal/menubar_terminal.py" &
 ```
 
 ## How persistence works
