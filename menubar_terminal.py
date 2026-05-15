@@ -9,7 +9,7 @@ Menubar Terminal for macOS
 • Sessions panel: view / attach / kill any session
 • ⌘T = new tab  ⌘W = close tab  ⌘1-9 = switch tab
 
-Run:        python3 ~/Desktop/Claude/Current/menubar-terminal/menubar_terminal.py &
+Run:        python3 "/Applications/Claude Applications/menubar-terminal/menubar_terminal.py" &
 Auto-start: load ~/Library/LaunchAgents/com.user.menubar-terminal.plist
 """
 

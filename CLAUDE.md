@@ -19,10 +19,10 @@ macOS menu bar terminal with tabs. Click ⌨ in the menu bar → floating xterm.
 
 ## Running
 ```bash
-python3 ~/Desktop/Claude/Current/menubar-terminal/menubar_terminal.py &
+python3 "/Applications/Claude Applications/menubar-terminal/menubar_terminal.py" &
 # Auto-start via LaunchAgent:
 launchctl load ~/Library/LaunchAgents/com.user.menubar-terminal.plist
 ```
 
 ## Location
-Lives at `~/Desktop/Claude/Current/menubar-terminal/`. All active projects live under `~/Desktop/Claude/Current/`; the project sidebar scans there.
+Lives at `/Applications/Claude Applications/menubar-terminal/` — outside `~/Desktop/` so launchd-spawned python3 isn't blocked by macOS TCC (Files & Folders permissions). Source projects you *open* in the terminal still live under `~/Desktop/Claude/Current/`; the project sidebar scans there.
