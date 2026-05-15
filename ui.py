@@ -247,11 +247,19 @@ class AppDelegate(NSObject):
         self._item.popUpStatusItemMenu_(menu)
 
     def restartApp_(self, _sender):
-        import subprocess, sys, os
+        import subprocess, os
         session._save_sessions()
-        # start_new_session detaches the child from us so os._exit doesn't HUP it
-        # before launchd has a chance to see the new process. Belt-and-suspenders.
-        subprocess.Popen([sys.executable] + sys.argv, start_new_session=True)
+        # Delegate to launchd via kickstart -k. Doing the relaunch ourselves
+        # with sys.executable spawns the CommandLineTools Python directly,
+        # which doesn't have TCC grants for ~/Desktop and fails to read our
+        # own script. launchctl is a /bin system binary, and launchd uses
+        # the plist's ProgramArguments (which sets /usr/bin/python3 — the
+        # system stub that DOES have Desktop access).
+        subprocess.Popen(
+            ["/bin/launchctl", "kickstart", "-k",
+             f"gui/{os.getuid()}/com.user.menubar-terminal"],
+            close_fds=True, start_new_session=True,
+        )
         os._exit(0)
 
     def _open(self):
