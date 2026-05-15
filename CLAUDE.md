@@ -19,7 +19,10 @@ macOS menu bar terminal with tabs. Click ⌨ in the menu bar → floating xterm.
 
 ## Running
 ```bash
-python3 ~/menubar-terminal/menubar_terminal.py &
+python3 ~/Desktop/Claude/Current/menubar-terminal/menubar_terminal.py &
 # Auto-start via LaunchAgent:
 launchctl load ~/Library/LaunchAgents/com.user.menubar-terminal.plist
 ```
+
+## Location
+Lives at `~/Desktop/Claude/Current/menubar-terminal/`. All active projects live under `~/Desktop/Claude/Current/`; the project sidebar scans there.

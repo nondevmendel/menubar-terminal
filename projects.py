@@ -110,11 +110,11 @@ def sync_claude_projects() -> None:
         print(f"[menubar-terminal] auto-added {added} project(s) from Claude", flush=True)
 
 
-# Locations scanned for git repos. ~/ is included so home-root projects
-# like ~/.rickrubin or ~/menubar-terminal are picked up; standard macOS
-# system folders inside ~ are skipped to avoid noise.
+# Locations scanned for git repos. Current/ is the canonical home for active
+# projects. ~/ stays in the list so any future home-root repos get picked up,
+# with macOS system folders and tool dotdirs filtered out.
 _GIT_SCAN_ROOTS = [
-    os.path.expanduser("~/Desktop/claude"),
+    os.path.expanduser("~/Desktop/Claude/Current"),
     os.path.expanduser("~/Documents"),
     os.path.expanduser("~/Sites"),
     _HOME,
