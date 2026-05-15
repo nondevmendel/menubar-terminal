@@ -37,6 +37,17 @@ class _ClipboardBridge(NSObject):
         self._wv = wv
 
     def userContentController_didReceiveScriptMessage_(self, _ucc, msg):
+        # CRITICAL: catch BaseException, not Exception. Any exception that
+        # escapes this method is wrapped by PyObjC into an OC_PythonException
+        # NSException and crashes the app. SystemExit / KeyboardInterrupt
+        # (which only `BaseException` covers) can be raised by a signal
+        # handler firing mid-callback.
+        try:
+            self._dispatch_message(msg)
+        except BaseException as e:
+            print(f"[bridge] {type(e).__name__}: {e}", flush=True)
+
+    def _dispatch_message(self, msg):
         name = str(msg.name())
         if name == "copy":
             text = str(msg.body() or "")
@@ -132,14 +143,18 @@ class TerminalWKWebView(WKWebView):
             None)
 
     def performKeyEquivalent_(self, event):
-        if event.modifierFlags() & NSEventModifierFlagCommand:
-            key = event.charactersIgnoringModifiers() or ''
-            if key == 'v':
-                self._do_paste()
-                return True
-            if key == 'c':
-                self._do_copy()
-                return True
+        try:
+            if event.modifierFlags() & NSEventModifierFlagCommand:
+                key = event.charactersIgnoringModifiers() or ''
+                if key == 'v':
+                    self._do_paste()
+                    return True
+                if key == 'c':
+                    self._do_copy()
+                    return True
+        except BaseException as e:
+            print(f"[key] {type(e).__name__}: {e}", flush=True)
+            return True
         return objc.super(TerminalWKWebView, self).performKeyEquivalent_(event)
 
     def draggingEntered_(self, sender):

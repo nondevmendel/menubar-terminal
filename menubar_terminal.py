@@ -49,8 +49,14 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 
     def _on_sigterm(_sig, _frame):
-        session._save_sessions()
-        sys.exit(0)
+        # Use os._exit, not sys.exit: sys.exit raises SystemExit, which — if
+        # the signal lands while Python is mid-callback inside a PyObjC bridge
+        # (e.g. pbcopy/pbpaste inside the WKWebView script-message handler) —
+        # propagates out as an uncaught NSException and crashes the app.
+        try:
+            session._save_sessions()
+        finally:
+            os._exit(0)
     signal.signal(signal.SIGTERM, _on_sigterm)
 
     threading.Thread(target=_run_ws_server, daemon=True).start()
