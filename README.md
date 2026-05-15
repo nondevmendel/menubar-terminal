@@ -24,8 +24,8 @@ A lightweight macOS menu bar terminal app. Click **⌨** in the menu bar to open
 
 ```bash
 # 1. Clone
-git clone https://github.com/nondevmendel/menubar-terminal.git ~/menubar-terminal
-cd ~/menubar-terminal
+git clone https://github.com/nondevmendel/menubar-terminal.git ~/Desktop/Claude/Current/menubar-terminal
+cd ~/Desktop/Claude/Current/menubar-terminal
 
 # 2. Install dtach
 brew install dtach
@@ -40,7 +40,7 @@ launchctl load ~/Library/LaunchAgents/com.user.menubar-terminal.plist
 ### Run manually (without LaunchAgent)
 
 ```bash
-python3 ~/menubar-terminal/menubar_terminal.py &
+python3 ~/Desktop/Claude/Current/menubar-terminal/menubar_terminal.py &
 ```
 
 ## How persistence works

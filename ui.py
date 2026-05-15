@@ -249,7 +249,9 @@ class AppDelegate(NSObject):
     def restartApp_(self, _sender):
         import subprocess, sys, os
         session._save_sessions()
-        subprocess.Popen([sys.executable] + sys.argv)
+        # start_new_session detaches the child from us so os._exit doesn't HUP it
+        # before launchd has a chance to see the new process. Belt-and-suspenders.
+        subprocess.Popen([sys.executable] + sys.argv, start_new_session=True)
         os._exit(0)
 
     def _open(self):

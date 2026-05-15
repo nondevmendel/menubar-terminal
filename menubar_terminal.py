@@ -5,11 +5,11 @@ Menubar Terminal for macOS
 • Click ⌨ in the menu bar to open a floating terminal
 • Right-click ⌨ for a menu (Restart)
 • Floats above full-screen apps
-• Every tab auto-starts inside tmux (sessions survive crashes)
-• Sessions panel: view / connect / detach / kill all tmux sessions
+• Every tab auto-starts inside dtach (sessions survive popover-close)
+• Sessions panel: view / attach / kill any session
 • ⌘T = new tab  ⌘W = close tab  ⌘1-9 = switch tab
 
-Run:        python3 ~/menubar-terminal/menubar_terminal.py &
+Run:        python3 ~/Desktop/Claude/Current/menubar-terminal/menubar_terminal.py &
 Auto-start: load ~/Library/LaunchAgents/com.user.menubar-terminal.plist
 """
 
