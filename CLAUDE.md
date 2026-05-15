@@ -16,6 +16,10 @@ macOS menu bar terminal with tabs. Click ⌨ in the menu bar → floating xterm.
 - Sessions: sockets in `~/.menubar_terminal/sockets/`, saved state in `~/.menubar_terminal/saved_sessions.json`
 - LaunchAgent: `~/Library/LaunchAgents/com.user.menubar-terminal.plist`
 - Logs: `/tmp/menubar-terminal.log`
+- dtach binary: `DtachLauncher.app/Contents/MacOS/dtach` (wrapper .app — see "TCC wrapper" below)
+
+## TCC wrapper (DtachLauncher.app)
+When a child shell inside a dtach session runs `osascript` (e.g. AppleScript-using commands, or Claude Code's terminal helpers), macOS asks for App Management permission. The TCC responsibility chain ends at dtach — and the System Settings + button refuses raw CLI binaries — so the prompt could not be permanently dismissed. `DtachLauncher.app` is a thin .app bundle containing a copy of the dtach binary (`bundle id com.user.menubar-terminal.dtach`, ad-hoc signed). `session.py` launches the wrapper's executable so TCC attributes prompts to the .app, which can be added once via System Settings → Privacy & Security → App Management → +. If dtach is upgraded via Homebrew, refresh the copy: `cp /opt/homebrew/bin/dtach DtachLauncher.app/Contents/MacOS/dtach && codesign --force --deep --sign - --identifier com.user.menubar-terminal.dtach DtachLauncher.app`.
 
 ## Running
 ```bash
