@@ -172,14 +172,17 @@ function updateMenuBarState(){
   try{window.webkit.messageHandlers.status.postMessage(s);}catch(ex){}
 }
 
-/* ── paste: bracketed-paste sequence sent straight to the PTY via WebSocket ── */
+/* ── paste: route via xterm.js so bracketed-paste markers are only emitted
+       when the running program has enabled DECSET 2004. Claude Code's TUI
+       doesn't enable it, so unconditional wrapping caused literal ^[[200~
+       to leak and embedded newlines to submit prematurely. ── */
 var _pasteAt=0;
 window._termPaste=function(text){
   var now=Date.now();
   if(now-_pasteAt<150)return;
   _pasteAt=now;
   var t=tabs.find(function(t){return t.id===act;});
-  if(t&&t.ws&&t.ws.readyState===1)t.ws.send(new TextEncoder().encode('\x1b[200~'+text+'\x1b[201~'));
+  if(t&&t.term)t.term.paste(text);
 };
 document.addEventListener('paste',function(e){
   var text=(e.clipboardData||window.clipboardData).getData('text/plain');
