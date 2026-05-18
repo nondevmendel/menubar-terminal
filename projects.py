@@ -117,6 +117,7 @@ _GIT_SCAN_ROOTS = [
     os.path.expanduser("~/Desktop/Claude/Current"),
     os.path.expanduser("~/Documents"),
     os.path.expanduser("~/Sites"),
+    "/Applications/Claude Applications",
     _HOME,
 ]
 _HOME_SKIP = {
