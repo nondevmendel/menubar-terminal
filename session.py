@@ -192,7 +192,13 @@ def _start_master(name: str, cwd: str = None) -> int:
         return _master_pid(name)
     shell = os.environ.get("SHELL", "/bin/zsh")
     start_dir = cwd if (cwd and os.path.isdir(cwd)) else os.path.expanduser("~")
-    env = {**os.environ, "TERM": "xterm-256color", "COLORTERM": "truecolor"}
+    # TERM_PROGRAM=wezterm short-circuits Claude Code's startup
+    # `osascript -e 'tell application "Terminal"...'` probe, which was
+    # triggering the per-session "DtachLauncher would like to access data
+    # from other apps" TCC prompt. Claude Code treats wezterm/ghostty as
+    # non-Apple terminals and skips the AppleScript path.
+    env = {**os.environ, "TERM": "xterm-256color", "COLORTERM": "truecolor",
+           "TERM_PROGRAM": "wezterm"}
     # remove stale socket
     try: os.unlink(sock)
     except OSError: pass
@@ -302,7 +308,8 @@ class PTYSession:
         global _session_counter
         self.clients: set = set()
         self._loop_running = False
-        env = {**os.environ, "TERM": "xterm-256color", "COLORTERM": "truecolor"}
+        env = {**os.environ, "TERM": "xterm-256color", "COLORTERM": "truecolor",
+               "TERM_PROGRAM": "wezterm"}
 
         if attach_to:
             self.name = attach_to
