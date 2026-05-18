@@ -334,8 +334,30 @@ class PTYSession:
             pass
 
     def write(self, data: bytes) -> None:
-        try:   os.write(self.fd, data)
-        except OSError: pass
+        # PTY fd is non-blocking (set in __init__); os.write may return EAGAIN
+        # when the kernel input buffer (~1KB on macOS) fills. We must drain via
+        # select() rather than dropping bytes, which previously silently
+        # truncated multi-line pastes mid-stream.
+        if b"\x1b[200~" in data or b"\x1b[201~" in data or len(data) > 200:
+            head = data[:120].replace(b"\x1b", b"<ESC>")
+            tail = data[-60:].replace(b"\x1b", b"<ESC>")
+            print(f"[pty-write {self.name}] {len(data)}B head={head!r} tail={tail!r}", flush=True)
+        n = 0
+        while n < len(data):
+            try:
+                wrote = os.write(self.fd, data[n:])
+                if wrote <= 0: break
+                n += wrote
+            except BlockingIOError:
+                _, w, _ = select.select([], [self.fd], [], 5.0)
+                if not w:
+                    print(f"[pty-write {self.name}] write stalled at {n}/{len(data)}", flush=True)
+                    return
+            except OSError as e:
+                print(f"[pty-write {self.name}] OSError at {n}/{len(data)}: {e}", flush=True)
+                return
+        if n != len(data):
+            print(f"[pty-write {self.name}] SHORT {n}/{len(data)}", flush=True)
 
     async def _read_loop(self) -> None:
         loop = asyncio.get_running_loop()
