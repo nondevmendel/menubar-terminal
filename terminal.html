@@ -172,17 +172,24 @@ function updateMenuBarState(){
   try{window.webkit.messageHandlers.status.postMessage(s);}catch(ex){}
 }
 
-/* ── paste: route via xterm.js so bracketed-paste markers are only emitted
-       when the running program has enabled DECSET 2004. Claude Code's TUI
-       doesn't enable it, so unconditional wrapping caused literal ^[[200~
-       to leak and embedded newlines to submit prematurely. ── */
+/* ── paste: always wrap in bracketed-paste markers and send directly over
+       the WebSocket. xterm.js's term.paste() only wraps when the running
+       program issued DECSET 2004; Claude Code does not, so without wrapping
+       its stdin sees the paste as multiple ~1KB read() chunks (its TUI
+       chunks each into its own "Pasted text" chip). Claude Code DOES parse
+       \x1b[200~/\x1b[201~ envelopes when it sees them, so unconditional
+       wrapping yields one chip. zsh/bash with bracketed-paste enabled
+       (default in most modern .zshrc setups) also handle the markers. ── */
 var _pasteAt=0;
 window._termPaste=function(text){
   var now=Date.now();
   if(now-_pasteAt<150)return;
   _pasteAt=now;
   var t=tabs.find(function(t){return t.id===act;});
-  if(t&&t.term)t.term.paste(text);
+  if(t&&t.ws&&t.ws.readyState===1){
+    var clean=text.replace(/\x1b/g,'');
+    t.ws.send(new TextEncoder().encode('\x1b[200~'+clean+'\x1b[201~'));
+  }
 };
 document.addEventListener('paste',function(e){
   var text=(e.clipboardData||window.clipboardData).getData('text/plain');

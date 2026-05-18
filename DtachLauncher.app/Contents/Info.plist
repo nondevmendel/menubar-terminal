@@ -20,5 +20,9 @@
     <true/>
     <key>LSBackgroundOnly</key>
     <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>The menubar-terminal's dtach-managed shells host Claude Code, which uses AppleScript to open URLs and integrate with other apps.</string>
+    <key>NSSystemAdministrationUsageDescription</key>
+    <string>Allow the menubar-terminal's dtach shells to host tools that interact with system administration tasks.</string>
 </dict>
 </plist>
